@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>スクリーンショットを写真ライブラリに保存します。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>シェア用画像を保存するために写真ライブラリへのアクセスが必要です。</string>
 </dict>
 </plist>
