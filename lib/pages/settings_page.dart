@@ -111,59 +111,6 @@ class _SettingsPageState extends State<SettingsPage> {
               }
             },
           ),
-          const Divider(height: 16),
-          ListTile(
-            leading: const Icon(Icons.developer_mode),
-            title: const Text('デバッグ: 現在時刻を上書き'),
-            subtitle: Text(s.debugNowOverride == null
-                ? '未設定（実時間）'
-                : 'Override: ' + s.debugNowOverride!.toLocal().toString()),
-          ),
-          ButtonBar(
-            alignment: MainAxisAlignment.start,
-            children: [
-              OutlinedButton(
-                onPressed: () async {
-                  final base = s.debugNowOverride ?? DateTime.now();
-                  setState(() => _settings = s..debugNowOverride = base.add(const Duration(days: 1)));
-                  await _save();
-                },
-                child: const Text('+1日'),
-              ),
-              OutlinedButton(
-                onPressed: () async {
-                  setState(() => _settings = s..debugNowOverride = null);
-                  await _save();
-                },
-                child: const Text('上書き解除'),
-              ),
-              OutlinedButton(
-                onPressed: () async {
-                  // 再スケジュールのみ（状態に応じて通知更新）
-                  final m = await AppStorage.instance.loadMarimo();
-                  if (m != null) {
-                    await NotificationService.instance.scheduleWaterChangeReminders(
-                      lastWaterChangeAt: m.lastWaterChangeAt,
-                      enabled: s.notificationsEnabled && m.state == MarimoState.alive,
-                      nowOverride: s.debugNowOverride,
-                    );
-                  }
-                },
-                child: const Text('通知再スケジュール'),
-              ),
-              OutlinedButton(
-                onPressed: () async {
-                  await NotificationService.instance.scheduleTestNotificationInOneMinute();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('1分後にテスト通知をスケジュールしました')),
-                    );
-                  }
-                },
-                child: const Text('1分後テスト通知'),
-              ),
-            ],
-          ),
           const SizedBox(height: 8),
         ],
       ),
