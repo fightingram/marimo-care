@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models.dart';
 import '../storage.dart';
+import '../backgrounds.dart';
 
 class SetupPage extends StatefulWidget {
   const SetupPage({super.key});
@@ -14,6 +15,7 @@ class SetupPage extends StatefulWidget {
 class _SetupPageState extends State<SetupPage> {
   final _nameController = TextEditingController();
   int _bgIndex = 0;
+  final FocusNode _nameFocus = FocusNode();
 
   Future<void> _start() async {
     final name = _nameController.text.trim().isEmpty ? 'まりも' : _nameController.text.trim();
@@ -25,7 +27,8 @@ class _SetupPageState extends State<SetupPage> {
       sizeMm: 5.0,
       cleanliness: 100,
       startedAt: now,
-      lastWaterChangeAt: now,
+      // 初回は未実施扱い
+      lastWaterChangeAt: null,
       lastGrowthTickAt: DateTime(now.year, now.month, now.day),
       lastInteractionAt: now,
       waterBoostUntil: null,
@@ -42,7 +45,7 @@ class _SetupPageState extends State<SetupPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('はじめに', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600))),
+      appBar: AppBar(title: const Text('はじめに', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.black))),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -51,6 +54,8 @@ class _SetupPageState extends State<SetupPage> {
             const Text('まりもの名前を決めましょう', style: TextStyle(fontSize: 17)),
             TextField(
               controller: _nameController,
+              focusNode: _nameFocus,
+              autofocus: true,
               decoration: const InputDecoration(hintText: '例: まりもっち'),
             ),
             const SizedBox(height: 24),
@@ -60,7 +65,7 @@ class _SetupPageState extends State<SetupPage> {
               height: 80,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: _presetBackgrounds.length,
+                itemCount: presetBackgrounds.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (context, i) {
                   return GestureDetector(
@@ -68,13 +73,13 @@ class _SetupPageState extends State<SetupPage> {
                     child: Container(
                       width: 80,
                       decoration: BoxDecoration(
-                        gradient: _presetBackgrounds[i].gradient,
+                        gradient: presetBackgrounds[i].gradient,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: i == _bgIndex ? Colors.blue : Colors.transparent, width: 2),
                       ),
                       child: Center(
                         child: Text(
-                          _presetBackgrounds[i].name,
+                          presetBackgrounds[i].name,
                           textAlign: TextAlign.center,
                           style: const TextStyle(fontSize: 12, color: Colors.white),
                         ),
@@ -97,24 +102,11 @@ class _SetupPageState extends State<SetupPage> {
       ),
     );
   }
-}
 
-class PresetBackground {
-  final String name;
-  final Gradient gradient;
-  const PresetBackground(this.name, this.gradient);
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _nameFocus.dispose();
+    super.dispose();
+  }
 }
-
-const _presetBackgrounds = <PresetBackground>[
-  PresetBackground('春', LinearGradient(colors: [Color(0xFFFA709A), Color(0xFFFEE140)])),
-  PresetBackground('夏', LinearGradient(colors: [Color(0xFF00C6FF), Color(0xFF0072FF)])),
-  PresetBackground('秋', LinearGradient(colors: [Color(0xFFF7971E), Color(0xFFFFD200)])),
-  PresetBackground('冬', LinearGradient(colors: [Color(0xFF83a4d4), Color(0xFFb6fbff)])),
-  PresetBackground('和紙', LinearGradient(colors: [Color(0xFFB993D6), Color(0xFF8CA6DB)])),
-  PresetBackground('宇宙', LinearGradient(colors: [Color(0xFF0F2027), Color(0xFF2C5364)])),
-  PresetBackground('深海', LinearGradient(colors: [Color(0xFF000428), Color(0xFF004e92)])),
-  PresetBackground('木漏れ日', LinearGradient(colors: [Color(0xFF56ab2f), Color(0xFFA8E063)])),
-  PresetBackground('夜景', LinearGradient(colors: [Color(0xFF434343), Color(0xFF000000)])),
-  PresetBackground('苔庭', LinearGradient(colors: [Color(0xFF11998e), Color(0xFF38ef7d)])),
-  PresetBackground('雪', LinearGradient(colors: [Color(0xFFe6dada), Color(0xFF274046)])),
-];

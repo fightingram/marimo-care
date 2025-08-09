@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../notification_service.dart';
 import '../storage.dart';
+import '../backgrounds.dart';
+import 'package:image_picker/image_picker.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -32,7 +34,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (m != null) {
       await NotificationService.instance.scheduleWaterChangeReminders(
         lastWaterChangeAt: m.lastWaterChangeAt,
-        enabled: _settings!.notificationsEnabled,
+        enabled: _settings!.notificationsEnabled && m.state == MarimoState.alive,
       );
     }
   }
@@ -74,14 +76,172 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           SwitchListTile(
             title: const Text('光合成・浮遊アニメ', style: TextStyle(fontSize: 17)),
+            subtitle: const Text('日中は「光合成中」インジケーターと、マリモがゆっくり漂います'),
             value: s.floatingEnabled,
             onChanged: (v) async {
               setState(() => _settings = s..floatingEnabled = v);
               await _save();
             },
           ),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.image),
+            title: const Text('背景を変更', style: TextStyle(fontSize: 17)),
+            subtitle: Text(
+              (s.customBackgroundPath != null && s.customBackgroundPath!.isNotEmpty)
+                  ? 'カスタム画像'
+                  : 'プリセット: ' + presetBackgrounds[(s.backgroundIndex) % presetBackgrounds.length].name,
+            ),
+            onTap: () async {
+              final res = await Navigator.of(context).push<_BgResultSettings>(
+                MaterialPageRoute(builder: (_) => const BackgroundGalleryPage()),
+              );
+              if (res != null) {
+                if (res.isCustom) {
+                  final newS = s..customBackgroundPath = res.customPath!;
+                  setState(() => _settings = newS);
+                  await _save();
+                } else {
+                  final newS = s
+                    ..backgroundIndex = res.index!
+                    ..customBackgroundPath = null;
+                  setState(() => _settings = newS);
+                  await _save();
+                }
+              }
+            },
+          ),
+          const Divider(height: 16),
+          ListTile(
+            leading: const Icon(Icons.developer_mode),
+            title: const Text('デバッグ: 現在時刻を上書き'),
+            subtitle: Text(s.debugNowOverride == null
+                ? '未設定（実時間）'
+                : 'Override: ' + s.debugNowOverride!.toLocal().toString()),
+          ),
+          ButtonBar(
+            alignment: MainAxisAlignment.start,
+            children: [
+              OutlinedButton(
+                onPressed: () async {
+                  final base = s.debugNowOverride ?? DateTime.now();
+                  setState(() => _settings = s..debugNowOverride = base.add(const Duration(days: 1)));
+                  await _save();
+                },
+                child: const Text('+1日'),
+              ),
+              OutlinedButton(
+                onPressed: () async {
+                  setState(() => _settings = s..debugNowOverride = null);
+                  await _save();
+                },
+                child: const Text('上書き解除'),
+              ),
+              OutlinedButton(
+                onPressed: () async {
+                  // 再スケジュールのみ（状態に応じて通知更新）
+                  final m = await AppStorage.instance.loadMarimo();
+                  if (m != null) {
+                    await NotificationService.instance.scheduleWaterChangeReminders(
+                      lastWaterChangeAt: m.lastWaterChangeAt,
+                      enabled: s.notificationsEnabled && m.state == MarimoState.alive,
+                      nowOverride: s.debugNowOverride,
+                    );
+                  }
+                },
+                child: const Text('通知再スケジュール'),
+              ),
+              OutlinedButton(
+                onPressed: () async {
+                  await NotificationService.instance.scheduleTestNotificationInOneMinute();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('1分後にテスト通知をスケジュールしました')),
+                    );
+                  }
+                },
+                child: const Text('1分後テスト通知'),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+}
+
+class _BgResultSettings {
+  final int? index;
+  final String? customPath;
+  final bool isCustom;
+  const _BgResultSettings.preset(this.index)
+      : customPath = null,
+        isCustom = false;
+  const _BgResultSettings.custom(this.customPath)
+      : index = null,
+        isCustom = true;
+}
+
+class BackgroundGalleryPage extends StatelessWidget {
+  const BackgroundGalleryPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('背景ギャラリー')),
+      body: GridView.builder(
+        padding: const EdgeInsets.all(12),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+        ),
+        itemCount: presetBackgrounds.length + 1,
+        itemBuilder: (context, i) {
+          if (i == presetBackgrounds.length) {
+            return GestureDetector(
+              onTap: () async {
+                final picker = ImagePicker();
+                final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 4096, maxHeight: 4096);
+                if (picked != null) {
+                  if (context.mounted) Navigator.of(context).pop(_BgResultSettings.custom(picked.path));
+                }
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.photo_library, color: Colors.white),
+                      SizedBox(height: 6),
+                      Text('アルバム', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+          return GestureDetector(
+            onTap: () => Navigator.of(context).pop(_BgResultSettings.preset(i)),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: presetBackgrounds[i].gradient,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  presetBackgrounds[i].name,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

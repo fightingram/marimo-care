@@ -9,7 +9,7 @@ class Marimo {
   double sizeMm;
   int cleanliness; // 0..100
   DateTime startedAt;
-  DateTime lastWaterChangeAt;
+  DateTime? lastWaterChangeAt;
   DateTime lastGrowthTickAt;
   DateTime lastInteractionAt;
   DateTime? waterBoostUntil; // optional, for +k window
@@ -21,7 +21,7 @@ class Marimo {
     required this.sizeMm,
     required this.cleanliness,
     required this.startedAt,
-    required this.lastWaterChangeAt,
+    this.lastWaterChangeAt,
     required this.lastGrowthTickAt,
     required this.lastInteractionAt,
     this.waterBoostUntil,
@@ -59,7 +59,7 @@ class Marimo {
         'sizeMm': sizeMm,
         'cleanliness': cleanliness,
         'startedAt': startedAt.toIso8601String(),
-        'lastWaterChangeAt': lastWaterChangeAt.toIso8601String(),
+        'lastWaterChangeAt': lastWaterChangeAt?.toIso8601String(),
         'lastGrowthTickAt': lastGrowthTickAt.toIso8601String(),
         'lastInteractionAt': lastInteractionAt.toIso8601String(),
         'waterBoostUntil': waterBoostUntil?.toIso8601String(),
@@ -73,7 +73,9 @@ class Marimo {
       sizeMm: (json['sizeMm'] as num).toDouble(),
       cleanliness: (json['cleanliness'] as num).toInt(),
       startedAt: DateTime.parse(json['startedAt'] as String),
-      lastWaterChangeAt: DateTime.parse(json['lastWaterChangeAt'] as String),
+      lastWaterChangeAt: (json['lastWaterChangeAt'] == null)
+          ? null
+          : DateTime.parse(json['lastWaterChangeAt'] as String),
       lastGrowthTickAt: DateTime.parse(json['lastGrowthTickAt'] as String),
       lastInteractionAt: DateTime.parse(json['lastInteractionAt'] as String),
       waterBoostUntil: json['waterBoostUntil'] == null
@@ -125,6 +127,7 @@ class UserSetting {
   bool floatingEnabled; // 光合成・浮遊アニメON/OFF
   int backgroundIndex; // 背景プリセットのインデックス（0..10）
   String? customBackgroundPath; // 端末アルバム画像のパス（未使用時null）
+  DateTime? debugNowOverride; // デバッグ用の現在時刻上書き（nullなら実時間）
 
   UserSetting({
     required this.notificationsEnabled,
@@ -133,6 +136,7 @@ class UserSetting {
     required this.floatingEnabled,
     required this.backgroundIndex,
     this.customBackgroundPath,
+    this.debugNowOverride,
   });
 
   Map<String, dynamic> toJson() => {
@@ -142,6 +146,7 @@ class UserSetting {
         'floatingEnabled': floatingEnabled,
         'backgroundIndex': backgroundIndex,
         'customBackgroundPath': customBackgroundPath,
+        'debugNowOverride': debugNowOverride?.toIso8601String(),
       };
 
   static UserSetting fromJson(Map<String, dynamic> json) => UserSetting(
@@ -151,6 +156,9 @@ class UserSetting {
         floatingEnabled: json['floatingEnabled'] as bool? ?? true,
         backgroundIndex: (json['backgroundIndex'] as num?)?.toInt() ?? 0,
         customBackgroundPath: json['customBackgroundPath'] as String?,
+        debugNowOverride: (json['debugNowOverride'] == null)
+            ? null
+            : DateTime.parse(json['debugNowOverride'] as String),
       );
 
   static String encode(UserSetting s) => jsonEncode(s.toJson());

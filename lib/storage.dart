@@ -47,6 +47,7 @@ class AppStorage {
         floatingEnabled: true,
         backgroundIndex: 0,
         customBackgroundPath: null,
+        debugNowOverride: null,
       );
     }
     return UserSetting.decode(raw);

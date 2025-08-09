@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'notification_service.dart';
+import 'storage.dart';
 import 'pages/home_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/setup_page.dart';
@@ -10,11 +10,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Initialize local notifications plugin
   await NotificationService.instance.init();
-  runApp(const MarimoApp());
+  final marimo = await AppStorage.instance.loadMarimo();
+  runApp(MarimoApp(startOnSetup: marimo == null));
 }
 
 class MarimoApp extends StatelessWidget {
-  const MarimoApp({super.key});
+  final bool startOnSetup;
+  const MarimoApp({super.key, required this.startOnSetup});
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +26,9 @@ class MarimoApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
         appBarTheme: const AppBarTheme(
-          titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.black),
+          foregroundColor: Colors.black,
+          backgroundColor: Colors.white,
         ),
       ),
       routes: {
@@ -32,7 +36,7 @@ class MarimoApp extends StatelessWidget {
         '/home': (_) => const HomePage(),
         '/settings': (_) => const SettingsPage(),
       },
-      home: const HomePage(),
+      home: startOnSetup ? const SetupPage() : const HomePage(),
     );
   }
 }

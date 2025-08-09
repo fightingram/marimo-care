@@ -20,7 +20,7 @@ class GrowthEngineConfig {
     this.baseSigmaMm = 0.05,
     this.baseMinMm = 0.0,
     this.baseMaxMm = 0.3,
-    this.cleanlinessDecayPerDay = 8,
+    this.cleanlinessDecayPerDay = 10,
     this.bonusOnWaterChangeMm = 0.1,
     this.kBaseMin = 0.5,
     this.kBaseMax = 1.0,
@@ -98,8 +98,9 @@ class GrowthEngine {
       ));
     }
     // Death check after progression
-    final lastCare = m.lastWaterChangeAt.isAfter(m.lastInteractionAt) ? m.lastWaterChangeAt : m.lastInteractionAt;
-    if (now.difference(lastCare).inDays >= 10) {
+    // Spec: if no water change for 11 days, marimo disappears
+    final baseline = m.lastWaterChangeAt ?? m.startedAt;
+    if (now.difference(baseline).inDays >= 11) {
       m = m.copyWith(state: MarimoState.dead);
     }
 
@@ -108,7 +109,7 @@ class GrowthEngine {
 
   Marimo applyWaterChange({required Marimo marimo, required DateTime now}) {
     // cooldown 24h
-    if (now.difference(marimo.lastWaterChangeAt).inHours < 24) {
+    if (marimo.lastWaterChangeAt != null && now.difference(marimo.lastWaterChangeAt!).inHours < 24) {
       return marimo;
     }
     var m = marimo.copyWith(
@@ -127,4 +128,3 @@ class GrowthEngine {
     return DateTime(local.year, local.month, local.day);
   }
 }
-

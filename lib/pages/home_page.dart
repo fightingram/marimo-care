@@ -9,16 +9,19 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../growth_logic.dart';
 import '../models.dart';
 import '../notification_service.dart';
 import '../storage.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../tank_items.dart';
 import '../marimo_comments.dart';
+import '../backgrounds.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,9 +30,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   Marimo? _marimo;
-  List<GrowthLog> _logs = [];
   UserSetting? _settings;
   int _bgIndex = 0;
   List<TankItem> _items = [];
@@ -48,12 +50,25 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   double _floatTime = 0.0;
   Offset _floatOffset = Offset.zero;
   bool _isCapturing = false;
+  // Water change wave effect state
+  bool _waveActive = false;
+  double _waveProgress = 0.0; // 0..1
   String? _speechText; // marimo speech bubble text
   Timer? _speechTimer;
+  // Audio player for SFX
+  final AudioPlayer _sfxPlayer = AudioPlayer();
+
+  DateTime _now() {
+    final s = _settings;
+    return (s?.debugNowOverride) ?? DateTime.now();
+  }
+
+  bool get _photosynthesisActive => (_settings?.floatingEnabled ?? true) && _isDaytime(_now());
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     // Prefer accelerometer (includes gravity); fallback to user accelerometer
     _accelSub = accelerometerEventStream().listen((e) {
@@ -122,16 +137,34 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     } else {
       _floatOffset = Offset.zero;
     }
+    // Wave effect progress
+    if (_waveActive) {
+      _waveProgress += dt / 1.2; // animate ~1.2s
+      if (_waveProgress >= 1.0) {
+        _waveActive = false;
+        _waveProgress = 0.0;
+      }
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _accelSub?.cancel();
     _userAccelSub?.cancel();
     _ticker.dispose();
     _speechTimer?.cancel();
+    _sfxPlayer.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // On foreground resume, refresh data and apply any pending growth
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -141,7 +174,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final s = await AppStorage.instance.loadSettings();
     setState(() {
       _settings = s;
-      _logs = logs;
       _marimo = m;
       _bgIndex = s.backgroundIndex;
       _items = items;
@@ -152,86 +184,60 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return;
     }
     // Apply growth ticks and schedule notifications
-    final now = DateTime.now();
+    final now = _now();
     final (updated, newLogs) = engine.applyDailyGrowth(marimo: m, now: now, existingLogs: logs);
     await AppStorage.instance.saveMarimo(updated);
     await AppStorage.instance.saveLogs(newLogs);
     setState(() {
       _marimo = updated;
-      _logs = newLogs;
     });
     await NotificationService.instance.scheduleWaterChangeReminders(
       lastWaterChangeAt: updated.lastWaterChangeAt,
-      enabled: s.notificationsEnabled,
+      enabled: s.notificationsEnabled && updated.state == MarimoState.alive,
+      nowOverride: _settings?.debugNowOverride,
     );
-    if (updated.state == MarimoState.dead) {
-      _showDeathDialog();
-    }
   }
 
-  void _showDeathDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('まりもが死んでしまいました'),
-        content: const Text('水槽をリセットして、また育ててあげてください。'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('記録を見る'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final now = DateTime.now();
-              final m = _marimo!;
-              final reset = Marimo(
-                id: m.id,
-                name: m.name,
-                state: MarimoState.alive,
-                sizeMm: 5.0,
-                cleanliness: 100,
-                startedAt: now,
-                lastWaterChangeAt: now,
-                lastGrowthTickAt: DateTime(now.year, now.month, now.day),
-                lastInteractionAt: now,
-                waterBoostUntil: null,
-              );
-              await AppStorage.instance.saveMarimo(reset);
-              if (!mounted) return;
-              Navigator.of(context).pop();
-              setState(() => _marimo = reset);
-            },
-            child: const Text('新しいまりもでリスタート'),
-          ),
-        ],
-      ),
-    );
-  }
+  // Removed old death dialog; using in-page overlay instead
 
   Future<void> _waterChange() async {
     if (_marimo == null) return;
-    final now = DateTime.now();
-    final hours = now.difference(_marimo!.lastWaterChangeAt).inHours;
-    if (hours < 24) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('水換えはあと${24 - hours}時間後にできます')),
-      );
-      return;
+    final now = _now();
+    final last = _marimo!.lastWaterChangeAt;
+    if (last != null) {
+      final hours = now.difference(last).inHours;
+      if (hours < 24) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('水換えはあと${24 - hours}時間後にできます')),
+        );
+        return;
+      }
     }
     final updated = engine.applyWaterChange(marimo: _marimo!, now: now);
     await AppStorage.instance.saveMarimo(updated);
     setState(() => _marimo = updated);
     await _hapticLight();
+    _startWaveEffect();
+    unawaited(_playWaterSound());
     // Reschedule notifications after water change
     final settings = _settings ?? await AppStorage.instance.loadSettings();
     await NotificationService.instance.scheduleWaterChangeReminders(
       lastWaterChangeAt: updated.lastWaterChangeAt,
       enabled: settings.notificationsEnabled,
+      nowOverride: _settings?.debugNowOverride,
     );
+  }
+
+  void _startWaveEffect() {
+    _waveActive = true;
+    _waveProgress = 0.0;
+  }
+
+  Future<void> _playWaterSound() async {
+    try {
+      await _sfxPlayer.play(AssetSource('sounds/water.wav'));
+    } catch (_) {}
   }
 
   Future<void> _poke() async {
@@ -264,7 +270,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final sizePx = (m.sizeMm * 5).clamp(30.0, 240.0); // scale factor for display
     final cleanColor = Color.lerp(Colors.red, Colors.green, m.cleanliness / 100.0) ?? Colors.green;
     final daysSinceStart = _daysSince(m.startedAt) + 1; // 1日目スタート
-    final lastWaterAgo = _daysAgoLabel(m.lastWaterChangeAt);
+    final lastWaterAgo = m.lastWaterChangeAt == null ? null : _daysAgoLabel(m.lastWaterChangeAt!);
 
     return Scaffold(
       appBar: AppBar(
@@ -272,7 +278,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
+            onPressed: () async {
+              await Navigator.of(context).pushNamed('/settings');
+              final s = await AppStorage.instance.loadSettings();
+              if (!mounted) return;
+              setState(() {
+                _settings = s;
+                _bgIndex = s.backgroundIndex;
+              });
+            },
           )
         ],
       ),
@@ -312,7 +326,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                 ),
                               ],
                             ),
-                            Text('最終水換え: ${_fmt(m.lastWaterChangeAt)}（${lastWaterAgo}）'),
+                            Text('最終水換え: ${lastWaterAgo == null ? '-' : '${_fmt(m.lastWaterChangeAt!)}（${lastWaterAgo}）'}'),
                           ],
                         ),
                       ),
@@ -327,9 +341,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         onTap: _poke,
                         onPanUpdate: (_) => _poke(),
                         child: Stack(
-                          children: [
+                        children: [
                             // Background inside boundary so screenshots include it
                         Positioned.fill(child: Container(decoration: _backgroundDecoration())),
+                        // Murkiness overlay based on cleanliness
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: _MurkinessLayer(level: 1.0 - (m.cleanliness / 100.0)),
+                          ),
+                        ),
                         // Items behind marimo
                         ..._buildItemWidgets(front: false),
                         Align(
@@ -339,7 +359,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           ),
                           child: GestureDetector(
                             onTap: _onMarimoTapped,
-                            child: _MarimoVisual(size: sizePx),
+                            child: ColorFiltered(
+                              colorFilter: ColorFilter.matrix(_brightnessMatrix(1.0 - 0.3 * (1.0 - (m.cleanliness / 100.0)))),
+                              child: _MarimoVisual(size: sizePx),
+                            ),
                           ),
                         ),
                         // Items in front of marimo
@@ -370,6 +393,50 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.2),
                                   ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_waveActive)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: _WaterWavePainter(progress: _waveProgress, isBrightBg: _isBackgroundBright()),
+                              ),
+                            ),
+                          ),
+                        // Photosynthesis indicator (daytime + enabled)
+                        if (_photosynthesisActive)
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: AnimatedOpacity(
+                              duration: const Duration(milliseconds: 250),
+                              opacity: 1.0,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: _isBackgroundBright()
+                                      ? Colors.black.withOpacity(0.45)
+                                      : Colors.white.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.wb_sunny,
+                                        size: 16,
+                                        color: _isBackgroundBright() ? Colors.white : Colors.orange.shade700),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '光合成中',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _isBackgroundBright() ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -412,50 +479,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
+                    // 背景変更は設定画面から行う運用へ移行
                     OutlinedButton.icon(
-                      onPressed: () async {
-                        final res = await Navigator.of(context).push<_BgResult>(
-                          MaterialPageRoute(builder: (_) => const _BackgroundGallery()),
-                        );
-                        if (res != null) {
-                          if (res.isCustom) {
-                            // Reload settings from storage to get the newly saved custom path
-                            final s = await AppStorage.instance.loadSettings();
-                            setState(() => _settings = s);
-                            // mark interaction
-                            final m = _marimo; if (m != null) {
-                              final updated = m.copyWith(lastInteractionAt: DateTime.now());
-                              await AppStorage.instance.saveMarimo(updated);
-                              setState(() => _marimo = updated);
-                            }
-                          } else {
-                            setState(() => _bgIndex = res.index!);
-                            final s = _settings ?? await AppStorage.instance.loadSettings();
-                            s.backgroundIndex = res.index!;
-                            s.customBackgroundPath = null;
-                            await AppStorage.instance.saveSettings(s);
-                            setState(() => _settings = s);
-                            // mark interaction
-                            final m = _marimo; if (m != null) {
-                              final updated = m.copyWith(lastInteractionAt: DateTime.now());
-                              await AppStorage.instance.saveMarimo(updated);
-                              setState(() => _marimo = updated);
-                            }
-                          }
-                          await _hapticSelection();
-                        }
-                      },
-                      icon: Icon(Icons.image, color: _outlineColor()),
-                      label: Text('背景変更', style: TextStyle(color: _outlineColor(), fontSize: 16)),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: _outlineColor()),
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _isCapturing ? null : _shareScreenshot,
+                      onPressed: _isCapturing ? null : _openShareSheet,
                       icon: Icon(Icons.share, color: _outlineColor()),
                       label: Text('シェア', style: TextStyle(color: _outlineColor(), fontSize: 16)),
                       style: OutlinedButton.styleFrom(
@@ -472,6 +498,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ],
             ),
           ),
+          if (m.state == MarimoState.dead)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Container(
+                    margin: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6))],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('💀', style: TextStyle(fontSize: 64)),
+                        const SizedBox(height: 8),
+                        const Text('まりもがいなくなってしまいました', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 12),
+                        Text('育てた日数: ${daysSinceStart}日間', style: const TextStyle(fontSize: 16)),
+                        const SizedBox(height: 8),
+                        const Text('今まで大切に育ててくれてありがとう', style: TextStyle(fontSize: 16)),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: () async {
+                            if (!mounted) return;
+                            Navigator.of(context).pushReplacementNamed('/setup');
+                          },
+                          child: const Text('新しいまりもを育てる'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_isCapturing)
             Positioned.fill(
               child: IgnorePointer(
@@ -496,54 +559,99 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Future<void> _shareScreenshot() async {
+  Future<void> _openShareSheet() async {
+    await _hapticSelection();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.chat),
+                title: const Text('LINEでシェア'),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _shareToLine();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.alternate_email),
+                title: const Text('Xでシェア'),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _shareToX();
+                },
+              ),
+              const Divider(height: 0),
+              ListTile(
+                leading: const Icon(Icons.download),
+                title: const Text('画像を保存'),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _saveScreenshot();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<Uint8List?> _captureScreenshotBytes() async {
+    // Returns PNG bytes of the current RepaintBoundary with optional watermark
+    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) throw Exception('boundary not found');
+    if (boundary.debugNeedsPaint) {
+      await Future.delayed(const Duration(milliseconds: 20));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    final devicePR = MediaQuery.of(context).devicePixelRatio;
+    final pixelRatio = (devicePR * 2.0).clamp(2.0, 4.0);
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    Uint8List bytes;
+    if ((_settings?.screenshotWatermark ?? true)) {
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      final w = image.width.toDouble();
+      final h = image.height.toDouble();
+      canvas.drawImage(image, const Offset(0, 0), Paint());
+      const label = 'Marimochi';
+      final tp = TextPainter(
+        text: const TextSpan(style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600), text: label),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      const pad = 16.0;
+      const margin = 24.0;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(w - tp.width - pad * 2 - margin, h - tp.height - pad * 2 - margin, tp.width + pad * 2, tp.height + pad * 2),
+        const Radius.circular(10),
+      );
+      final bg = Paint()..color = Colors.black54;
+      canvas.drawRRect(rect, bg);
+      tp.paint(canvas, Offset(w - tp.width - pad - margin, h - tp.height - pad - margin));
+      final picture = recorder.endRecording();
+      final watermarked = await picture.toImage(image.width, image.height);
+      final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return null;
+      bytes = byteData.buffer.asUint8List();
+    } else {
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return null;
+      bytes = byteData.buffer.asUint8List();
+    }
+    return bytes;
+  }
+
+  Future<void> _saveScreenshot() async {
     try {
       setState(() => _isCapturing = true);
-      // Ensure boundary is painted
-      final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) throw Exception('boundary not found');
-      if (boundary.debugNeedsPaint) {
-        await Future.delayed(const Duration(milliseconds: 20));
-        await WidgetsBinding.instance.endOfFrame;
-      }
-      final devicePR = MediaQuery.of(context).devicePixelRatio;
-      final pixelRatio = (devicePR * 2.0).clamp(2.0, 4.0);
-      final image = await boundary.toImage(pixelRatio: pixelRatio);
-      // Optionally add watermark to the captured image
-      Uint8List bytes;
-      if ((_settings?.screenshotWatermark ?? true)) {
-        final recorder = ui.PictureRecorder();
-        final canvas = ui.Canvas(recorder);
-        final w = image.width.toDouble();
-        final h = image.height.toDouble();
-        // Draw original image
-        canvas.drawImage(image, const Offset(0, 0), Paint());
-        // Prepare watermark text
-        const label = 'Marimochi';
-        final tp = TextPainter(
-          text: const TextSpan(style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600), text: label),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        const pad = 16.0;
-        const margin = 24.0;
-        final rect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(w - tp.width - pad * 2 - margin, h - tp.height - pad * 2 - margin, tp.width + pad * 2, tp.height + pad * 2),
-          const Radius.circular(10),
-        );
-        final bg = Paint()..color = Colors.black54;
-        canvas.drawRRect(rect, bg);
-        tp.paint(canvas, Offset(w - tp.width - pad - margin, h - tp.height - pad - margin));
-        // Finish and extract bytes
-        final picture = recorder.endRecording();
-        final watermarked = await picture.toImage(image.width, image.height);
-        final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData == null) return;
-        bytes = byteData.buffer.asUint8List();
-      } else {
-        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData == null) return;
-        bytes = byteData.buffer.asUint8List();
-      }
+      final bytes = await _captureScreenshotBytes();
+      if (bytes == null) throw Exception('screenshot failed');
       final name = 'marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final result = await ImageGallerySaver.saveImage(
         bytes,
@@ -560,6 +668,52 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('スクショの作成に失敗しました')));
+    } finally {
+      if (mounted) setState(() => _isCapturing = false);
+    }
+  }
+
+  Future<void> _shareToLine() async {
+    try {
+      setState(() => _isCapturing = true);
+      final bytes = await _captureScreenshotBytes();
+      if (bytes == null) throw Exception('screenshot failed');
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
+      final file = File(path);
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles(
+        [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
+        text: 'Marimochiの記録',
+        subject: 'Marimochi',
+      );
+      await _hapticLight();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('LINE共有に失敗しました')));
+    } finally {
+      if (mounted) setState(() => _isCapturing = false);
+    }
+  }
+
+  Future<void> _shareToX() async {
+    try {
+      setState(() => _isCapturing = true);
+      final bytes = await _captureScreenshotBytes();
+      if (bytes == null) throw Exception('screenshot failed');
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
+      final file = File(path);
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles(
+        [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
+        text: '#Marimochi',
+        subject: 'Marimochi',
+      );
+      await _hapticLight();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('X共有に失敗しました')));
     } finally {
       if (mounted) setState(() => _isCapturing = false);
     }
@@ -592,7 +746,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   int _daysSince(DateTime since) {
-    final a = DateTime.now().toLocal();
+    final a = _now().toLocal();
     final b = since.toLocal();
     final ad = DateTime(a.year, a.month, a.day);
     final bd = DateTime(b.year, b.month, b.day);
@@ -616,7 +770,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         );
       }
     }
-    return BoxDecoration(gradient: _presetBackgrounds[_bgIndex % _presetBackgrounds.length].gradient);
+    return BoxDecoration(gradient: presetBackgrounds[_bgIndex % presetBackgrounds.length].gradient);
+  }
+
+  // Brightness color matrix for ColorFiltered
+  List<double> _brightnessMatrix(double b) {
+    // Clamp and return a 5x4 color matrix that scales RGB by b (alpha unchanged)
+    final bb = b.clamp(0.0, 1.5);
+    return <double>[
+      bb, 0,  0,  0, 0,
+      0,  bb, 0,  0, 0,
+      0,  0,  bb, 0, 0,
+      0,  0,  0,  1, 0,
+    ];
   }
 
   bool _isBackgroundBright() {
@@ -625,7 +791,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Unknown; assume bright so we use dark panel
       return true;
     }
-    final bg = _presetBackgrounds[_bgIndex % _presetBackgrounds.length];
+    final bg = presetBackgrounds[_bgIndex % presetBackgrounds.length];
     if (bg.gradient is LinearGradient) {
       final g = bg.gradient as LinearGradient;
       final avg = Color.lerp(g.colors.first, g.colors.last, 0.5) ?? g.colors.first;
@@ -819,6 +985,46 @@ class _ItemGallery extends StatelessWidget {
   }
 }
 
+class _WaterWavePainter extends CustomPainter {
+  final double progress; // 0..1
+  final bool isBrightBg;
+  _WaterWavePainter({required this.progress, required this.isBrightBg});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = progress;
+    // Two layered waves moving upwards with fade out
+    final baseColor = isBrightBg ? const Color(0xAAFFFFFF) : const Color(0x55FFFFFF);
+    final wave1 = Paint()..color = baseColor..style = PaintingStyle.fill;
+    final wave2 = Paint()..color = baseColor.withOpacity((0.6 * (1 - t)).clamp(0, 1))..style = PaintingStyle.fill;
+
+    final amp = size.height * 0.03 * (1 - t); // decreasing amplitude
+    final yOffset = size.height * (1 - t); // wave rises up
+
+    Path makeWave(double phase, double scale) {
+      final path = Path();
+      path.moveTo(0, size.height);
+      path.lineTo(0, yOffset);
+      final steps = 40;
+      for (int i = 0; i <= steps; i++) {
+        final x = size.width * i / steps;
+        final y = yOffset + math.sin((i / steps * 2 * math.pi) + phase) * amp * scale;
+        path.lineTo(x, y);
+      }
+      path.lineTo(size.width, size.height);
+      path.close();
+      return path;
+    }
+
+    canvas.drawPath(makeWave(0 + t * 2 * math.pi, 1.0), wave1);
+    canvas.drawPath(makeWave(math.pi / 2 + t * 2.4 * math.pi, 0.6), wave2);
+  }
+
+  @override
+  bool shouldRepaint(covariant _WaterWavePainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.isBrightBg != isBrightBg;
+}
+
 class _MarimoVisual extends StatelessWidget {
   final double size;
   const _MarimoVisual({required this.size});
@@ -844,95 +1050,67 @@ class _MarimoVisual extends StatelessWidget {
   }
 }
 
-class PresetBackground {
-  final String name;
-  final Gradient gradient;
-  const PresetBackground(this.name, this.gradient);
-}
 
-const _presetBackgrounds = <PresetBackground>[
-  PresetBackground('春', LinearGradient(colors: [Color(0xFFFA709A), Color(0xFFFEE140)])),
-  PresetBackground('夏', LinearGradient(colors: [Color(0xFF00C6FF), Color(0xFF0072FF)])),
-  PresetBackground('秋', LinearGradient(colors: [Color(0xFFF7971E), Color(0xFFFFD200)])),
-  PresetBackground('冬', LinearGradient(colors: [Color(0xFF83a4d4), Color(0xFFb6fbff)])),
-  PresetBackground('和紙', LinearGradient(colors: [Color(0xFFB993D6), Color(0xFF8CA6DB)])),
-  PresetBackground('宇宙', LinearGradient(colors: [Color(0xFF0F2027), Color(0xFF2C5364)])),
-  PresetBackground('深海', LinearGradient(colors: [Color(0xFF000428), Color(0xFF004e92)])),
-  PresetBackground('木漏れ日', LinearGradient(colors: [Color(0xFF56ab2f), Color(0xFFA8E063)])),
-  PresetBackground('夜景', LinearGradient(colors: [Color(0xFF434343), Color(0xFF000000)])),
-  PresetBackground('苔庭', LinearGradient(colors: [Color(0xFF11998e), Color(0xFF38ef7d)])),
-  PresetBackground('雪', LinearGradient(colors: [Color(0xFFe6dada), Color(0xFF274046)])),
-];
+class _MurkinessLayer extends StatelessWidget {
+  final double level; // 0.0 (clean) .. 1.0 (very murky)
+  const _MurkinessLayer({required this.level});
 
-class _BgResult {
-  final int? index; // preset index when not custom
-  final bool isCustom;
-  const _BgResult.preset(this.index) : isCustom = false;
-  const _BgResult.custom() : index = null, isCustom = true;
-}
-
-class _BackgroundGallery extends StatelessWidget {
-  const _BackgroundGallery();
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('背景ギャラリー')),
-      body: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
+    if (level <= 0) return const SizedBox.shrink();
+    // Cap opacity for aesthetics
+    final tintOpacity = (0.18 * level).clamp(0.0, 0.35);
+    return Stack(
+      children: [
+        // Subtle color tint towards green-brown to imply murky water
+        Positioned.fill(
+          child: Container(color: const Color(0xFF26332F).withOpacity(tintOpacity)),
         ),
-        itemCount: _presetBackgrounds.length + 1,
-        itemBuilder: (context, i) {
-          if (i == _presetBackgrounds.length) {
-            return GestureDetector(
-              onTap: () async {
-                final picker = ImagePicker();
-                final picked = await picker.pickImage(source: ImageSource.gallery, maxWidth: 4096, maxHeight: 4096);
-                if (picked != null) {
-                  final s = await AppStorage.instance.loadSettings();
-                  s.customBackgroundPath = picked.path;
-                  await AppStorage.instance.saveSettings(s);
-                  if (context.mounted) Navigator.of(context).pop(const _BgResult.custom());
-                }
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black26,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.photo_library, color: Colors.white),
-                      SizedBox(height: 6),
-                      Text('アルバム', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }
-          return GestureDetector(
-            onTap: () => Navigator.of(context).pop(_BgResult.preset(i)),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: _presetBackgrounds[i].gradient,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Text(
-                  _presetBackgrounds[i].name,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+        // Floating particles
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _MurkinessPainter(level: level),
+          ),
+        ),
+      ],
     );
   }
 }
+
+class _MurkinessPainter extends CustomPainter {
+  final double level;
+  _MurkinessPainter({required this.level});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final int count = (20 + level * 120).toInt();
+    final rnd = math.Random(123456); // deterministic positions
+    final Paint p = Paint()
+      ..color = const Color(0xFF8D6E63).withOpacity(0.08 + 0.22 * level)
+      ..isAntiAlias = true;
+    for (int i = 0; i < count; i++) {
+      final dx = rnd.nextDouble() * size.width;
+      final dy = rnd.nextDouble() * size.height;
+      final r = (1.0 + rnd.nextDouble() * 2.5) * (0.5 + level);
+      canvas.drawCircle(Offset(dx, dy), r, p);
+    }
+    // Light vertical streaks to suggest algae film
+    final streakPaint = Paint()
+      ..color = const Color(0xFF4E4E4E).withOpacity(0.04 * level)
+      ..strokeWidth = 2.0
+      ..isAntiAlias = true;
+    final streaks = (size.width / 40).toInt();
+    for (int s = 0; s < streaks; s++) {
+      final x = (s * 40.0) + (rnd.nextDouble() * 20 - 10);
+      canvas.drawLine(Offset(x, 0), Offset(x + 6, size.height), streakPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MurkinessPainter oldDelegate) {
+    // Repaint if level changes
+    return oldDelegate.level != level;
+  }
+}
+
+// Removed old background gallery logic now migrated to SettingsPage
