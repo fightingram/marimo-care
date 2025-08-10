@@ -1,5 +1,4 @@
 import 'dart:ui' as ui;
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:async';
 import 'dart:math' as math;
@@ -310,7 +309,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           runSpacing: 6,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            Text('育て始めて: ${daysSinceStart}日目'),
+                            Text('育て始めて: $daysSinceStart日目'),
                             Text('サイズ: ${m.sizeMm.toStringAsFixed(2)}mm'),
                             Row(
                               mainAxisSize: MainAxisSize.min,
@@ -326,7 +325,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                 ),
                               ],
                             ),
-                            Text('最終水換え: ${lastWaterAgo == null ? '-' : '${_fmt(m.lastWaterChangeAt!)}（${lastWaterAgo}）'}'),
+                            Text('最終水換え: ${lastWaterAgo == null ? '-' : '${_fmt(m.lastWaterChangeAt!)}（$lastWaterAgo）'}'),
                           ],
                         ),
                       ),
@@ -518,7 +517,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         const SizedBox(height: 8),
                         const Text('まりもがいなくなってしまいました', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 12),
-                        Text('育てた日数: ${daysSinceStart}日間', style: const TextStyle(fontSize: 16)),
+                        Text('育てた日数: $daysSinceStart日間', style: const TextStyle(fontSize: 16)),
                         const SizedBox(height: 8),
                         const Text('今まで大切に育ててくれてありがとう', style: TextStyle(fontSize: 16)),
                         const SizedBox(height: 16),
@@ -757,7 +756,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final days = _daysSince(time);
     if (days <= 0) return '今日';
     if (days == 1) return '1日前';
-    return '${days}日前';
+    return '$days日前';
   }
 
   BoxDecoration _backgroundDecoration() {
@@ -949,38 +948,38 @@ class _ItemGallery extends StatelessWidget {
   const _ItemGallery();
   @override
   Widget build(BuildContext context) {
-    final specs = TankItemRegistry.all();
-    return Scaffold(
-      appBar: AppBar(title: const Text('アイテムを追加')),
-      body: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 8,
-          mainAxisSpacing: 8,
-        ),
-        itemCount: specs.length,
-        itemBuilder: (context, i) {
-          final s = specs[i];
-          return InkWell(
-            onTap: () => Navigator.of(context).pop(s.type),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black26,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  s.previewBuilder(context),
-                  const SizedBox(height: 6),
-                  Text(s.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
-              ),
+    return FutureBuilder<List<TankItemSpec>>(
+      future: TankItemRegistry.loadSvgSpecs(),
+      builder: (context, snapshot) {
+        final specs = snapshot.data ?? const <TankItemSpec>[];
+        return Scaffold(
+          appBar: AppBar(title: const Text('アイテムを追加')),
+          body: GridView.builder(
+            padding: const EdgeInsets.all(12),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
             ),
-          );
-        },
-      ),
+            itemCount: specs.length,
+            itemBuilder: (context, i) {
+              final s = specs[i];
+              return InkWell(
+                onTap: () => Navigator.of(context).pop(s.type),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: s.previewBuilder(context),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
