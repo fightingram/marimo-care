@@ -1,11 +1,11 @@
 {
-    "name": "marimo_care",
-    "short_name": "marimo_care",
+    "name": "まりもっち",
+    "short_name": "まりもっち",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "まりもっち",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

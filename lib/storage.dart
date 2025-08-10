@@ -6,6 +6,7 @@ class StorageKeys {
   static const growthLogs = 'growth_logs_v1';
   static const settings = 'user_settings_v1';
   static const items = 'tank_items_v1';
+  static const tutorialShown = 'tutorial_shown_v1';
 }
 
 class AppStorage {
@@ -72,5 +73,15 @@ class AppStorage {
   Future<void> saveItems(List<TankItem> items) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(StorageKeys.items, TankItem.encodeList(items));
+  }
+
+  Future<bool> isTutorialShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(StorageKeys.tutorialShown) ?? false;
+  }
+
+  Future<void> setTutorialShown(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(StorageKeys.tutorialShown, value);
   }
 }

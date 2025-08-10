@@ -1,4 +1,5 @@
 import 'dart:ui' as ui;
+import 'dart:typed_data' show Uint8List;
 import 'dart:io';
 import 'dart:async';
 import 'dart:math' as math;
@@ -56,6 +57,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Timer? _speechTimer;
   // Audio player for SFX
   final AudioPlayer _sfxPlayer = AudioPlayer();
+  // First-run tutorial
+  bool _showTutorial = false;
+  int _tutorialStep = 0;
 
   DateTime _now() {
     final s = _settings;
@@ -195,6 +199,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       enabled: s.notificationsEnabled && updated.state == MarimoState.alive,
       nowOverride: _settings?.debugNowOverride,
     );
+    // Show first-run tutorial if not shown before
+    final shown = await AppStorage.instance.isTutorialShown();
+    if (!shown && mounted) {
+      setState(() {
+        _tutorialStep = 0;
+        _showTutorial = true;
+      });
+    }
   }
 
   // Removed old death dialog; using in-page overlay instead
@@ -552,6 +564,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 ),
               ),
             ),
+          _tutorialOverlay(),
         ],
       ),
     );
@@ -608,45 +621,61 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       await Future.delayed(const Duration(milliseconds: 20));
       await WidgetsBinding.instance.endOfFrame;
     }
+
     final devicePR = MediaQuery.of(context).devicePixelRatio;
-    final pixelRatio = (devicePR * 2.0).clamp(2.0, 4.0);
-    final image = await boundary.toImage(pixelRatio: pixelRatio);
-    Uint8List bytes;
-    if ((_settings?.screenshotWatermark ?? true)) {
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      final w = image.width.toDouble();
-      final h = image.height.toDouble();
-      canvas.drawImage(image, const Offset(0, 0), Paint());
-      const label = 'Marimochi';
-      final tp = TextPainter(
-        text: const TextSpan(style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600), text: label),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      const pad = 16.0;
-      const margin = 24.0;
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(w - tp.width - pad * 2 - margin, h - tp.height - pad * 2 - margin, tp.width + pad * 2, tp.height + pad * 2),
-        const Radius.circular(10),
-      );
-      final bg = Paint()..color = Colors.black54;
-      canvas.drawRRect(rect, bg);
-      tp.paint(canvas, Offset(w - tp.width - pad - margin, h - tp.height - pad - margin));
-      final picture = recorder.endRecording();
-      final watermarked = await picture.toImage(image.width, image.height);
-      final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return null;
-      bytes = byteData.buffer.asUint8List();
-    } else {
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return null;
-      bytes = byteData.buffer.asUint8List();
+    final candidates = <double>[
+      (devicePR * 1.5).clamp(1.5, 3.0).toDouble(),
+      devicePR.clamp(1.0, 2.5).toDouble(),
+      1.0,
+    ];
+
+    for (final ratio in candidates) {
+      try {
+        final image = await boundary.toImage(pixelRatio: ratio);
+        if ((_settings?.screenshotWatermark ?? true)) {
+          final recorder = ui.PictureRecorder();
+          final canvas = ui.Canvas(recorder);
+          final w = image.width.toDouble();
+          final h = image.height.toDouble();
+          canvas.drawImage(image, const Offset(0, 0), Paint());
+          const label = 'まりもっち';
+          final tp = TextPainter(
+            text: const TextSpan(style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600), text: label),
+            textDirection: TextDirection.ltr,
+          )..layout();
+          const pad = 16.0;
+          const margin = 24.0;
+          final rect = RRect.fromRectAndRadius(
+            Rect.fromLTWH(w - tp.width - pad * 2 - margin, h - tp.height - pad * 2 - margin, tp.width + pad * 2, tp.height + pad * 2),
+            const Radius.circular(10),
+          );
+          final bg = Paint()..color = Colors.black54;
+          canvas.drawRRect(rect, bg);
+          tp.paint(canvas, Offset(w - tp.width - pad - margin, h - tp.height - pad - margin));
+          final picture = recorder.endRecording();
+          final watermarked = await picture.toImage(image.width, image.height);
+          final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData != null) {
+            return byteData.buffer.asUint8List();
+          }
+        } else {
+          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+          if (byteData != null) {
+            return byteData.buffer.asUint8List();
+          }
+        }
+      } catch (_) {
+        // try next lower ratio
+      }
     }
-    return bytes;
+    return null;
   }
 
   Future<void> _saveScreenshot() async {
     try {
+      // Wait for any UI transitions (e.g., sheets) to finish
+      await Future.delayed(const Duration(milliseconds: 60));
+      await WidgetsBinding.instance.endOfFrame;
       setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
@@ -663,7 +692,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         SnackBar(content: Text(ok ? 'ライブラリに保存しました' : '保存に失敗しました')),
       );
       await _hapticLight();
-    } catch (_) {
+    } catch (e) {
+      // Log for diagnostics
+      // ignore: avoid_print
+      print('saveScreenshot error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('スクショの作成に失敗しました')));
     } finally {
@@ -673,6 +705,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _shareToLine() async {
     try {
+      // Ensure UI is settled after closing bottom sheet
+      await Future.delayed(const Duration(milliseconds: 60));
+      await WidgetsBinding.instance.endOfFrame;
       setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
@@ -680,13 +715,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
+      final box = context.findRenderObject() as RenderBox?;
+      final origin = box != null
+          ? (box.localToGlobal(Offset.zero) & box.size)
+          : const ui.Rect.fromLTWH(0, 0, 1, 1);
       await Share.shareXFiles(
         [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
-        text: 'Marimochiの記録',
-        subject: 'Marimochi',
+        text: 'まりもっちの記録',
+        subject: 'まりもっち',
+        sharePositionOrigin: origin,
       );
       await _hapticLight();
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('shareToLine error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('LINE共有に失敗しました')));
     } finally {
@@ -696,6 +738,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _shareToX() async {
     try {
+      await Future.delayed(const Duration(milliseconds: 60));
+      await WidgetsBinding.instance.endOfFrame;
       setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
@@ -703,13 +747,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
+      final box = context.findRenderObject() as RenderBox?;
+      final origin = box != null
+          ? (box.localToGlobal(Offset.zero) & box.size)
+          : const ui.Rect.fromLTWH(0, 0, 1, 1);
       await Share.shareXFiles(
         [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
-        text: '#Marimochi',
-        subject: 'Marimochi',
+        text: '#まりもっち',
+        subject: 'まりもっち',
+        sharePositionOrigin: origin,
       );
       await _hapticLight();
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('shareToX error: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('X共有に失敗しました')));
     } finally {
@@ -803,6 +854,84 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Color _primaryBg() => _panelTextColor() == Colors.white ? Colors.white : Colors.black87;
   Color _primaryFg() => _panelTextColor() == Colors.white ? Colors.black : Colors.white;
   Color _outlineColor() => _panelTextColor().withOpacity(0.9);
+
+  Widget _tutorialOverlay() {
+    if (!_showTutorial) return const SizedBox.shrink();
+    final steps = [
+      (
+        'ようこそ！',
+        '端末を傾けるとまりもが動きます。\nタップで反応します。日中はゆっくり漂います。'
+      ),
+      (
+        '水換えとアイテム',
+        '下部の「水換え」ボタンで清潔度UP。\n「アイテム追加」で水槽にパーツを置けます。'
+      ),
+      (
+        'お手入れの注意',
+        '水換えをしない日が続くと水槽が濁っていきます。\n10日間放置すると、まりもがいなくなってしまうことがあります。'
+      ),
+      (
+        'アイテムの編集',
+        'ピンチ操作で移動・拡大縮小・回転。\n長押しで「削除/前後移動」を選べます。設定から背景変更も可能。'
+      ),
+    ];
+    final (title, message) = steps[_tutorialStep];
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: Container(
+          color: Colors.black54,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Material(
+                color: Colors.white,
+                elevation: 6,
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 10),
+                      Text(message, style: const TextStyle(fontSize: 16, height: 1.4)),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: () async {
+                              await AppStorage.instance.setTutorialShown(true);
+                              if (mounted) setState(() => _showTutorial = false);
+                            },
+                            child: const Text('スキップ'),
+                          ),
+                          const Spacer(),
+                          FilledButton(
+                            onPressed: () async {
+                              final lastStep = steps.length - 1;
+                              if (_tutorialStep < lastStep) {
+                                setState(() => _tutorialStep += 1);
+                              } else {
+                                await AppStorage.instance.setTutorialShown(true);
+                                if (mounted) setState(() => _showTutorial = false);
+                              }
+                            },
+                            child: Text(_tutorialStep < (steps.length - 1) ? '次へ' : 'はじめる'),
+                          )
+                        ],
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   List<Widget> _buildItemWidgets({required bool front}) {
     return _items
