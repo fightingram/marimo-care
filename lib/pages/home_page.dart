@@ -338,7 +338,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     child: SizedBox.expand(
                       child: GestureDetector(
                         onTap: _poke,
-                        onPanUpdate: (_) => _poke(),
                         child: Stack(
                         children: [
                             // Background inside boundary so screenshots include it
@@ -840,7 +839,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       y: 0.7, // near bottom by default
       scale: scale,
       rotation: 0.0,
-      front: false, // initially behind marimo
+      front: true, // initially in front for easy manipulation
     );
     setState(() => _items = [..._items, newItem]);
     await AppStorage.instance.saveItems(_items);

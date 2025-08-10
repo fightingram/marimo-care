@@ -218,7 +218,8 @@ class TankItem {
         y: (json['y'] as num).toDouble(),
         scale: (json['scale'] as num).toDouble(),
         rotation: (json['rotation'] as num).toDouble(),
-        front: json['front'] as bool? ?? false,
+        // Default to true so legacy-saved items (without 'front') remain editable in front layer
+        front: json['front'] as bool? ?? true,
       );
 
   static String encodeList(List<TankItem> items) => jsonEncode(items.map((e) => e.toJson()).toList());
