@@ -57,6 +57,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Timer? _speechTimer;
   // Audio player for SFX
   final AudioPlayer _sfxPlayer = AudioPlayer();
+  void _log(Object msg) {
+    // ignore: avoid_print
+    print('[Home/share] $msg');
+  }
   // First-run tutorial
   bool _showTutorial = false;
   int _tutorialStep = 0;
@@ -617,9 +621,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Returns PNG bytes of the current RepaintBoundary with optional watermark
     final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
     if (boundary == null) throw Exception('boundary not found');
-    if (boundary.debugNeedsPaint) {
+    int settleTries = 0;
+    while (boundary.debugNeedsPaint && settleTries < 3) {
+      _log('boundary needs paint, waiting frame (${settleTries + 1})');
       await Future.delayed(const Duration(milliseconds: 20));
       await WidgetsBinding.instance.endOfFrame;
+      settleTries++;
     }
 
     final devicePR = MediaQuery.of(context).devicePixelRatio;
@@ -630,8 +637,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     ];
 
     for (final ratio in candidates) {
+      _log('trying capture with pixelRatio=$ratio');
       try {
         final image = await boundary.toImage(pixelRatio: ratio);
+        _log('captured image ${image.width}x${image.height}');
         if ((_settings?.screenshotWatermark ?? true)) {
           final recorder = ui.PictureRecorder();
           final canvas = ui.Canvas(recorder);
@@ -656,19 +665,31 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           final watermarked = await picture.toImage(image.width, image.height);
           final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
           if (byteData != null) {
+            _log('encoded watermarked bytes: ${byteData.lengthInBytes}');
             return byteData.buffer.asUint8List();
           }
         } else {
           final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
           if (byteData != null) {
+            _log('encoded bytes: ${byteData.lengthInBytes}');
             return byteData.buffer.asUint8List();
           }
         }
-      } catch (_) {
+      } catch (e, st) {
+        _log('capture failed at ratio=$ratio: $e\n$st');
         // try next lower ratio
       }
     }
     return null;
+  }
+
+  Future<void> _shareImages(List<String> paths, {required String text, required String subject}) async {
+    final files = paths.map((p) => XFile(p, mimeType: 'image/png', name: 'marimo.png')).toList();
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box != null ? (box.localToGlobal(Offset.zero) & box.size) : const ui.Rect.fromLTWH(0, 0, 1, 1);
+    _log('sharing ${paths.length} files via XFiles');
+    // share_plus v10+ removes shareFiles; use shareXFiles exclusively
+    await Share.shareXFiles(files, text: text, subject: subject, sharePositionOrigin: origin);
   }
 
   Future<void> _saveScreenshot() async {
@@ -715,16 +736,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
-      final box = context.findRenderObject() as RenderBox?;
-      final origin = box != null
-          ? (box.localToGlobal(Offset.zero) & box.size)
-          : const ui.Rect.fromLTWH(0, 0, 1, 1);
-      await Share.shareXFiles(
-        [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
-        text: 'まりもっちの記録',
-        subject: 'まりもっち',
-        sharePositionOrigin: origin,
-      );
+      await _shareImages([path], text: 'まりもっちの記録', subject: 'まりもっち');
       await _hapticLight();
     } catch (e) {
       // ignore: avoid_print
@@ -747,16 +759,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
-      final box = context.findRenderObject() as RenderBox?;
-      final origin = box != null
-          ? (box.localToGlobal(Offset.zero) & box.size)
-          : const ui.Rect.fromLTWH(0, 0, 1, 1);
-      await Share.shareXFiles(
-        [XFile(path, mimeType: 'image/png', name: 'marimo.png')],
-        text: '#まりもっち',
-        subject: 'まりもっち',
-        sharePositionOrigin: origin,
-      );
+      await _shareImages([path], text: '#まりもっち', subject: 'まりもっち');
       await _hapticLight();
     } catch (e) {
       // ignore: avoid_print
