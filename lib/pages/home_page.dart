@@ -621,19 +621,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Returns PNG bytes of the current RepaintBoundary with optional watermark
     final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
     if (boundary == null) throw Exception('boundary not found');
+    // Ensure the boundary has painted; wait a few frames if needed
     int settleTries = 0;
-    while (boundary.debugNeedsPaint && settleTries < 3) {
+    while (boundary.debugNeedsPaint && settleTries < 5) {
       _log('boundary needs paint, waiting frame (${settleTries + 1})');
-      await Future.delayed(const Duration(milliseconds: 20));
       await WidgetsBinding.instance.endOfFrame;
+      await Future.delayed(const Duration(milliseconds: 16));
       settleTries++;
     }
 
     final devicePR = MediaQuery.of(context).devicePixelRatio;
+    // Try safer, smaller pixel ratios first to avoid OOM on high-DPI devices
     final candidates = <double>[
-      (devicePR * 1.5).clamp(1.5, 3.0).toDouble(),
-      devicePR.clamp(1.0, 2.5).toDouble(),
       1.0,
+      devicePR.clamp(1.0, 2.0).toDouble(),
+      (devicePR * 1.25).clamp(1.0, 2.5).toDouble(),
     ];
 
     for (final ratio in candidates) {
@@ -677,7 +679,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
       } catch (e, st) {
         _log('capture failed at ratio=$ratio: $e\n$st');
-        // try next lower ratio
+        // try next candidate
       }
     }
     return null;
@@ -688,8 +690,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final box = context.findRenderObject() as RenderBox?;
     final origin = box != null ? (box.localToGlobal(Offset.zero) & box.size) : const ui.Rect.fromLTWH(0, 0, 1, 1);
     _log('sharing ${paths.length} files via XFiles');
-    // share_plus v10+ removes shareFiles; use shareXFiles exclusively
-    await Share.shareXFiles(files, text: text, subject: subject, sharePositionOrigin: origin);
+    // On some iOS versions, passing subject/origin can trigger plugin edge cases.
+    if (Platform.isIOS) {
+      await Share.shareXFiles(files, text: text);
+    } else {
+      // share_plus v10+ removes shareFiles; use shareXFiles exclusively
+      await Share.shareXFiles(files, text: text, subject: subject, sharePositionOrigin: origin);
+    }
   }
 
   Future<void> _saveScreenshot() async {
@@ -697,26 +704,57 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Wait for any UI transitions (e.g., sheets) to finish
       await Future.delayed(const Duration(milliseconds: 60));
       await WidgetsBinding.instance.endOfFrame;
-      setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
+      if (mounted) setState(() => _isCapturing = true);
       final name = 'marimo_${DateTime.now().millisecondsSinceEpoch}.png';
-      final result = await ImageGallerySaver.saveImage(
-        bytes,
-        name: name,
-        isReturnImagePathOfIOS: true,
-        quality: 100,
-      );
+      bool ok = false;
+      try {
+        // Prefer saveFile path to avoid known iOS plugin crash paths in saveImage
+        final tempDir = await getTemporaryDirectory();
+        final tempPath = '${tempDir.path}/$name';
+        final f = File(tempPath);
+        await f.writeAsBytes(bytes);
+        dynamic result;
+        try {
+          result = await ImageGallerySaver.saveFile(tempPath, isReturnPathOfIOS: true);
+        } catch (_) {
+          result = await ImageGallerySaver.saveImage(
+            bytes,
+            name: name,
+            isReturnImagePathOfIOS: true,
+            quality: 100,
+          );
+        }
+        ok = (result is Map) ? (result['isSuccess'] == true || result['filePath'] != null) : (result != null);
+      } catch (inner) {
+        // ignore: avoid_print
+        print('saveScreenshot inner error: $inner');
+        ok = false;
+      }
       if (!mounted) return;
-      final ok = (result is Map) ? (result['isSuccess'] == true || result['filePath'] != null) : true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? 'ライブラリに保存しました' : '保存に失敗しました')),
-      );
+      if (!ok && Platform.isIOS) {
+        // Graceful fallback: open share sheet so user can Save Image manually
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('保存に失敗。共有から「画像を保存」を選んでください')),
+        );
+        final dir = await getTemporaryDirectory();
+        final path = '${dir.path}/$name';
+        final file = File(path);
+        if (!(await file.exists())) {
+          await file.writeAsBytes(bytes);
+        }
+        await _shareImages([path], text: 'まりもっちの記録', subject: 'まりもっち');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ok ? 'ライブラリに保存しました' : '保存に失敗しました')),
+        );
+      }
       await _hapticLight();
-    } catch (e) {
+    } catch (e, st) {
       // Log for diagnostics
       // ignore: avoid_print
-      print('saveScreenshot error: $e');
+      print('saveScreenshot error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('スクショの作成に失敗しました')));
     } finally {
@@ -729,18 +767,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Ensure UI is settled after closing bottom sheet
       await Future.delayed(const Duration(milliseconds: 60));
       await WidgetsBinding.instance.endOfFrame;
-      setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
+      if (mounted) setState(() => _isCapturing = true);
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
       await _shareImages([path], text: 'まりもっちの記録', subject: 'まりもっち');
       await _hapticLight();
-    } catch (e) {
+    } catch (e, st) {
       // ignore: avoid_print
-      print('shareToLine error: $e');
+      print('shareToLine error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('LINE共有に失敗しました')));
     } finally {
@@ -752,18 +790,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     try {
       await Future.delayed(const Duration(milliseconds: 60));
       await WidgetsBinding.instance.endOfFrame;
-      setState(() => _isCapturing = true);
       final bytes = await _captureScreenshotBytes();
       if (bytes == null) throw Exception('screenshot failed');
+      if (mounted) setState(() => _isCapturing = true);
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
       final file = File(path);
       await file.writeAsBytes(bytes);
       await _shareImages([path], text: '#まりもっち', subject: 'まりもっち');
       await _hapticLight();
-    } catch (e) {
+    } catch (e, st) {
       // ignore: avoid_print
-      print('shareToX error: $e');
+      print('shareToX error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('X共有に失敗しました')));
     } finally {
