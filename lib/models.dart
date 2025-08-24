@@ -122,7 +122,6 @@ class GrowthLog {
 
 class UserSetting {
   bool notificationsEnabled;
-  bool screenshotWatermark;
   bool haptics;
   bool floatingEnabled; // 光合成・浮遊アニメON/OFF
   int backgroundIndex; // 背景プリセットのインデックス（0..10）
@@ -131,7 +130,6 @@ class UserSetting {
 
   UserSetting({
     required this.notificationsEnabled,
-    required this.screenshotWatermark,
     required this.haptics,
     required this.floatingEnabled,
     required this.backgroundIndex,
@@ -141,7 +139,6 @@ class UserSetting {
 
   Map<String, dynamic> toJson() => {
         'notificationsEnabled': notificationsEnabled,
-        'screenshotWatermark': screenshotWatermark,
         'haptics': haptics,
         'floatingEnabled': floatingEnabled,
         'backgroundIndex': backgroundIndex,
@@ -151,7 +148,6 @@ class UserSetting {
 
   static UserSetting fromJson(Map<String, dynamic> json) => UserSetting(
         notificationsEnabled: json['notificationsEnabled'] as bool? ?? true,
-        screenshotWatermark: json['screenshotWatermark'] as bool? ?? true,
         haptics: json['haptics'] as bool? ?? true,
         floatingEnabled: json['floatingEnabled'] as bool? ?? true,
         backgroundIndex: (json['backgroundIndex'] as num?)?.toInt() ?? 0,

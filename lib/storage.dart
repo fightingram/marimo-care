@@ -43,7 +43,6 @@ class AppStorage {
     if (raw == null) {
       return UserSetting(
         notificationsEnabled: true,
-        screenshotWatermark: true,
         haptics: true,
         floatingEnabled: true,
         backgroundIndex: 0,

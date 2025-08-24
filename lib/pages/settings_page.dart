@@ -58,14 +58,6 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
           SwitchListTile(
-            title: const Text('スクショに透かしロゴ', style: TextStyle(fontSize: 17)),
-            value: s.screenshotWatermark,
-            onChanged: (v) async {
-              setState(() => _settings = s..screenshotWatermark = v);
-              await _save();
-            },
-          ),
-          SwitchListTile(
             title: const Text('ハプティクス', style: TextStyle(fontSize: 17)),
             subtitle: const Text('操作時の軽い振動フィードバックを有効にします', style: TextStyle(fontSize: 13)),
             value: s.haptics,

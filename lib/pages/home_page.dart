@@ -1,23 +1,17 @@
-import 'dart:ui' as ui;
-import 'dart:typed_data' show Uint8List;
 import 'dart:io';
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../growth_logic.dart';
 import '../models.dart';
 import '../notification_service.dart';
 import '../storage.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:uuid/uuid.dart';
 import '../tank_items.dart';
 import '../marimo_comments.dart';
@@ -30,13 +24,13 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   Marimo? _marimo;
   UserSetting? _settings;
   int _bgIndex = 0;
   List<TankItem> _items = [];
   final engine = GrowthEngine();
-  final _repaintBoundaryKey = GlobalKey();
 
   // Physics state (alignment space [-1,1])
   Offset _pos = const Offset(0, -0.9); // start near top
@@ -49,7 +43,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // Floating animation (small drift) when enabled and daytime
   double _floatTime = 0.0;
   Offset _floatOffset = Offset.zero;
-  bool _isCapturing = false;
   // Water change wave effect state
   bool _waveActive = false;
   double _waveProgress = 0.0; // 0..1
@@ -58,9 +51,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   // Audio player for SFX
   final AudioPlayer _sfxPlayer = AudioPlayer();
   void _log(Object msg) {
+    // legacy logger for debugging; kept minimal
     // ignore: avoid_print
-    print('[Home/share] $msg');
+    print('[Home] $msg');
   }
+
   // First-run tutorial
   bool _showTutorial = false;
   int _tutorialStep = 0;
@@ -70,7 +65,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return (s?.debugNowOverride) ?? DateTime.now();
   }
 
-  bool get _photosynthesisActive => (_settings?.floatingEnabled ?? true) && _isDaytime(_now());
+  bool get _photosynthesisActive =>
+      (_settings?.floatingEnabled ?? true) && _isDaytime(_now());
 
   @override
   void initState() {
@@ -138,7 +134,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Floating drift update (tiny sinusoidal)
     if ((_settings?.floatingEnabled ?? true) && _isDaytime(now)) {
       _floatTime += dt;
-      final fx = math.sin(_floatTime * 0.6) * 0.06; // amplitude in alignment units
+      final fx =
+          math.sin(_floatTime * 0.6) * 0.06; // amplitude in alignment units
       final fy = math.cos(_floatTime * 0.8) * 0.06;
       _floatOffset = Offset(fx, fy);
     } else {
@@ -192,7 +189,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     // Apply growth ticks and schedule notifications
     final now = _now();
-    final (updated, newLogs) = engine.applyDailyGrowth(marimo: m, now: now, existingLogs: logs);
+    final (updated, newLogs) =
+        engine.applyDailyGrowth(marimo: m, now: now, existingLogs: logs);
     await AppStorage.instance.saveMarimo(updated);
     await AppStorage.instance.saveLogs(newLogs);
     setState(() {
@@ -282,10 +280,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final sizePx = (m.sizeMm * 5).clamp(30.0, 240.0); // scale factor for display
-    final cleanColor = Color.lerp(Colors.red, Colors.green, m.cleanliness / 100.0) ?? Colors.green;
+    final sizePx =
+        (m.sizeMm * 5).clamp(30.0, 240.0); // scale factor for display
+    final cleanColor =
+        Color.lerp(Colors.red, Colors.green, m.cleanliness / 100.0) ??
+            Colors.green;
     final daysSinceStart = _daysSince(m.startedAt) + 1; // 1日目スタート
-    final lastWaterAgo = m.lastWaterChangeAt == null ? null : _daysAgoLabel(m.lastWaterChangeAt!);
+    final lastWaterAgo = m.lastWaterChangeAt == null
+        ? null
+        : _daysAgoLabel(m.lastWaterChangeAt!);
+    final lastWaterLabel = (lastWaterAgo == null)
+        ? '-'
+        : '${_fmt(m.lastWaterChangeAt!)}（$lastWaterAgo）';
 
     return Scaffold(
       appBar: AppBar(
@@ -311,11 +317,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             color: Theme.of(context).colorScheme.surface,
             child: Column(
               children: [
+                // Top summary panel
                 Padding(
                   padding: const EdgeInsets.all(12.0),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(color: _panelColor(), borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                        color: _panelColor(),
+                        borderRadius: BorderRadius.circular(12)),
                     child: DefaultTextStyle(
                       style: TextStyle(color: _panelTextColor(), fontSize: 16),
                       child: IconTheme(
@@ -341,174 +351,188 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                 ),
                               ],
                             ),
-                            Text('最終水換え: ${lastWaterAgo == null ? '-' : '${_fmt(m.lastWaterChangeAt!)}（$lastWaterAgo）'}'),
+                            Text('最終水換え: $lastWaterLabel'),
                           ],
                         ),
                       ),
                     ),
                   ),
                 ),
+                // Main tank area
                 Expanded(
-                  child: RepaintBoundary(
-                    key: _repaintBoundaryKey,
-                    child: SizedBox.expand(
-                      child: GestureDetector(
-                        onTap: _poke,
-                        child: Stack(
+                  child: SizedBox.expand(
+                    child: GestureDetector(
+                      onTap: _poke,
+                      child: Stack(
                         children: [
-                            // Background inside boundary so screenshots include it
-                        Positioned.fill(child: Container(decoration: _backgroundDecoration())),
-                        // Murkiness overlay based on cleanliness
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: _MurkinessLayer(level: 1.0 - (m.cleanliness / 100.0)),
-                          ),
-                        ),
-                        // Items behind marimo
-                        ..._buildItemWidgets(front: false),
-                        Align(
-                          alignment: Alignment(
-                            (_pos.dx + _floatOffset.dx).clamp(-0.98, 0.98),
-                            (_pos.dy + _floatOffset.dy).clamp(-0.98, 0.98),
-                          ),
-                          child: GestureDetector(
-                            onTap: _onMarimoTapped,
-                            child: ColorFiltered(
-                              colorFilter: ColorFilter.matrix(_brightnessMatrix(1.0 - 0.3 * (1.0 - (m.cleanliness / 100.0)))),
-                              child: _MarimoVisual(size: sizePx),
+                          Positioned.fill(
+                              child: Container(
+                                  decoration: _backgroundDecoration())),
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: _MurkinessLayer(
+                                  level: 1.0 - (m.cleanliness / 100.0)),
                             ),
                           ),
-                        ),
-                        // Items in front of marimo
-                        ..._buildItemWidgets(front: true),
-                        if (_speechText != null)
+                          ..._buildItemWidgets(front: false),
                           Align(
                             alignment: Alignment(
                               (_pos.dx + _floatOffset.dx).clamp(-0.98, 0.98),
                               (_pos.dy + _floatOffset.dy).clamp(-0.98, 0.98),
                             ),
-                            child: Transform.translate(
-                              offset: Offset(0, -sizePx * 0.75 - 24),
+                            child: GestureDetector(
+                              onTap: _onMarimoTapped,
+                              child: ColorFiltered(
+                                colorFilter: ColorFilter.matrix(
+                                  _brightnessMatrix(1.0 -
+                                      0.3 * (1.0 - (m.cleanliness / 100.0))),
+                                ),
+                                child: _MarimoVisual(size: sizePx),
+                              ),
+                            ),
+                          ),
+                          ..._buildItemWidgets(front: true),
+                          if (_speechText != null)
+                            Align(
+                              alignment: Alignment(
+                                (_pos.dx + _floatOffset.dx).clamp(-0.98, 0.98),
+                                (_pos.dy + _floatOffset.dy).clamp(-0.98, 0.98),
+                              ),
+                              child: Transform.translate(
+                                offset: Offset(0, -sizePx * 0.75 - 24),
+                                child: AnimatedOpacity(
+                                  opacity: 1.0,
+                                  duration: const Duration(milliseconds: 180),
+                                  child: Container(
+                                    constraints:
+                                        const BoxConstraints(maxWidth: 240),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.92),
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                            color: Colors.black26,
+                                            blurRadius: 8,
+                                            offset: Offset(0, 3)),
+                                      ],
+                                    ),
+                                    child: Text(
+                                      _speechText!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          color: Colors.black87,
+                                          fontSize: 14,
+                                          height: 1.2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (_waveActive)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _WaterWavePainter(
+                                      progress: _waveProgress,
+                                      isBrightBg: _isBackgroundBright()),
+                                ),
+                              ),
+                            ),
+                          if (_photosynthesisActive)
+                            Positioned(
+                              top: 8,
+                              left: 8,
                               child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 250),
                                 opacity: 1.0,
-                                duration: const Duration(milliseconds: 180),
                                 child: Container(
-                                  constraints: const BoxConstraints(maxWidth: 240),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.92),
-                                    borderRadius: BorderRadius.circular(12),
-                                    boxShadow: const [
-                                      BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 3)),
+                                    color: _isBackgroundBright()
+                                        ? Colors.black.withOpacity(0.45)
+                                        : Colors.white.withOpacity(0.8),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.wb_sunny,
+                                        size: 16,
+                                        color: _isBackgroundBright()
+                                            ? Colors.white
+                                            : Colors.orange.shade700,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '光合成中',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: _isBackgroundBright()
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      ),
                                     ],
                                   ),
-                                  child: Text(
-                                    _speechText!,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.black87, fontSize: 14, height: 1.2),
-                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        if (_waveActive)
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: _WaterWavePainter(progress: _waveProgress, isBrightBg: _isBackgroundBright()),
-                              ),
-                            ),
-                          ),
-                        // Photosynthesis indicator (daytime + enabled)
-                        if (_photosynthesisActive)
-                          Positioned(
-                            top: 8,
-                            left: 8,
-                            child: AnimatedOpacity(
-                              duration: const Duration(milliseconds: 250),
-                              opacity: 1.0,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: _isBackgroundBright()
-                                      ? Colors.black.withOpacity(0.45)
-                                      : Colors.white.withOpacity(0.8),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.wb_sunny,
-                                        size: 16,
-                                        color: _isBackgroundBright() ? Colors.white : Colors.orange.shade700),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '光合成中',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: _isBackgroundBright() ? Colors.white : Colors.black87,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          ],
-                        ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(color: _panelColor(), borderRadius: BorderRadius.circular(16)),
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _onAddItemPressed,
-                      icon: Icon(Icons.add, color: _outlineColor()),
-                      label: Text('アイテム追加', style: TextStyle(color: _outlineColor(), fontSize: 16)),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: _outlineColor()),
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
+                // Bottom action bar
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 48),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                        color: _panelColor(),
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _onAddItemPressed,
+                          icon: Icon(Icons.add, color: _outlineColor()),
+                          label: Text('アイテム追加',
+                              style: TextStyle(
+                                  color: _outlineColor(), fontSize: 16)),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: _outlineColor()),
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: _waterChange,
+                          icon: Icon(Icons.water_drop, color: _primaryFg()),
+                          label: Text('水換え',
+                              style:
+                                  TextStyle(color: _primaryFg(), fontSize: 16)),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _primaryBg(),
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ],
                     ),
-                    FilledButton.icon(
-                      onPressed: _waterChange,
-                      icon: Icon(Icons.water_drop, color: _primaryFg()),
-                      label: Text('水換え', style: TextStyle(color: _primaryFg(), fontSize: 16)),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _primaryBg(),
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                    // 背景変更は設定画面から行う運用へ移行
-                    OutlinedButton.icon(
-                      onPressed: _isCapturing ? null : _openShareSheet,
-                      icon: Icon(Icons.share, color: _outlineColor()),
-                      label: Text('シェア', style: TextStyle(color: _outlineColor(), fontSize: 16)),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: _outlineColor()),
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
               ],
             ),
           ),
@@ -523,45 +547,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
-                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6))],
+                      boxShadow: const [
+                        BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 12,
+                            offset: Offset(0, 6))
+                      ],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text('💀', style: TextStyle(fontSize: 64)),
                         const SizedBox(height: 8),
-                        const Text('まりもがいなくなってしまいました', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                        const Text('まりもがいなくなってしまいました',
+                            style: TextStyle(
+                                fontSize: 20, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 12),
-                        Text('育てた日数: $daysSinceStart日間', style: const TextStyle(fontSize: 16)),
+                        Text('育てた日数: $daysSinceStart日間',
+                            style: const TextStyle(fontSize: 16)),
                         const SizedBox(height: 8),
-                        const Text('今まで大切に育ててくれてありがとう', style: TextStyle(fontSize: 16)),
+                        const Text('今まで大切に育ててくれてありがとう',
+                            style: TextStyle(fontSize: 16)),
                         const SizedBox(height: 16),
                         FilledButton(
                           onPressed: () async {
                             if (!mounted) return;
-                            Navigator.of(context).pushReplacementNamed('/setup');
+                            Navigator.of(context)
+                                .pushReplacementNamed('/setup');
                           },
                           child: const Text('新しいまりもを育てる'),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (_isCapturing)
-            Positioned.fill(
-              child: IgnorePointer(
-                ignoring: false,
-                child: Container(
-                  color: Colors.black38,
-                  child: const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 12),
-                        Text('画像を作成中...', style: TextStyle(color: Colors.white)),
                       ],
                     ),
                   ),
@@ -572,241 +587,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ],
       ),
     );
-  }
-
-  Future<void> _openShareSheet() async {
-    await _hapticSelection();
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.chat),
-                title: const Text('LINEでシェア'),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _shareToLine();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.alternate_email),
-                title: const Text('Xでシェア'),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _shareToX();
-                },
-              ),
-              const Divider(height: 0),
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('画像を保存'),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _saveScreenshot();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<Uint8List?> _captureScreenshotBytes() async {
-    // Returns PNG bytes of the current RepaintBoundary with optional watermark
-    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-    if (boundary == null) throw Exception('boundary not found');
-    // Ensure the boundary has painted; wait a few frames if needed
-    int settleTries = 0;
-    while (boundary.debugNeedsPaint && settleTries < 5) {
-      _log('boundary needs paint, waiting frame (${settleTries + 1})');
-      await WidgetsBinding.instance.endOfFrame;
-      await Future.delayed(const Duration(milliseconds: 16));
-      settleTries++;
-    }
-
-    final devicePR = MediaQuery.of(context).devicePixelRatio;
-    // Try safer, smaller pixel ratios first to avoid OOM on high-DPI devices
-    final candidates = <double>[
-      1.0,
-      devicePR.clamp(1.0, 2.0).toDouble(),
-      (devicePR * 1.25).clamp(1.0, 2.5).toDouble(),
-    ];
-
-    for (final ratio in candidates) {
-      _log('trying capture with pixelRatio=$ratio');
-      try {
-        final image = await boundary.toImage(pixelRatio: ratio);
-        _log('captured image ${image.width}x${image.height}');
-        if ((_settings?.screenshotWatermark ?? true)) {
-          final recorder = ui.PictureRecorder();
-          final canvas = ui.Canvas(recorder);
-          final w = image.width.toDouble();
-          final h = image.height.toDouble();
-          canvas.drawImage(image, const Offset(0, 0), Paint());
-          const label = 'まりもっち';
-          final tp = TextPainter(
-            text: const TextSpan(style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600), text: label),
-            textDirection: TextDirection.ltr,
-          )..layout();
-          const pad = 16.0;
-          const margin = 24.0;
-          final rect = RRect.fromRectAndRadius(
-            Rect.fromLTWH(w - tp.width - pad * 2 - margin, h - tp.height - pad * 2 - margin, tp.width + pad * 2, tp.height + pad * 2),
-            const Radius.circular(10),
-          );
-          final bg = Paint()..color = Colors.black54;
-          canvas.drawRRect(rect, bg);
-          tp.paint(canvas, Offset(w - tp.width - pad - margin, h - tp.height - pad - margin));
-          final picture = recorder.endRecording();
-          final watermarked = await picture.toImage(image.width, image.height);
-          final byteData = await watermarked.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData != null) {
-            _log('encoded watermarked bytes: ${byteData.lengthInBytes}');
-            return byteData.buffer.asUint8List();
-          }
-        } else {
-          final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-          if (byteData != null) {
-            _log('encoded bytes: ${byteData.lengthInBytes}');
-            return byteData.buffer.asUint8List();
-          }
-        }
-      } catch (e, st) {
-        _log('capture failed at ratio=$ratio: $e\n$st');
-        // try next candidate
-      }
-    }
-    return null;
-  }
-
-  Future<void> _shareImages(List<String> paths, {required String text, required String subject}) async {
-    final files = paths.map((p) => XFile(p, mimeType: 'image/png', name: 'marimo.png')).toList();
-    final box = context.findRenderObject() as RenderBox?;
-    final origin = box != null ? (box.localToGlobal(Offset.zero) & box.size) : const ui.Rect.fromLTWH(0, 0, 1, 1);
-    _log('sharing ${paths.length} files via XFiles');
-    // On some iOS versions, passing subject/origin can trigger plugin edge cases.
-    if (Platform.isIOS) {
-      await Share.shareXFiles(files, text: text);
-    } else {
-      // share_plus v10+ removes shareFiles; use shareXFiles exclusively
-      await Share.shareXFiles(files, text: text, subject: subject, sharePositionOrigin: origin);
-    }
-  }
-
-  Future<void> _saveScreenshot() async {
-    try {
-      // Wait for any UI transitions (e.g., sheets) to finish
-      await Future.delayed(const Duration(milliseconds: 60));
-      await WidgetsBinding.instance.endOfFrame;
-      final bytes = await _captureScreenshotBytes();
-      if (bytes == null) throw Exception('screenshot failed');
-      if (mounted) setState(() => _isCapturing = true);
-      final name = 'marimo_${DateTime.now().millisecondsSinceEpoch}.png';
-      bool ok = false;
-      try {
-        // Prefer saveFile path to avoid known iOS plugin crash paths in saveImage
-        final tempDir = await getTemporaryDirectory();
-        final tempPath = '${tempDir.path}/$name';
-        final f = File(tempPath);
-        await f.writeAsBytes(bytes);
-        dynamic result;
-        try {
-          result = await ImageGallerySaver.saveFile(tempPath, isReturnPathOfIOS: true);
-        } catch (_) {
-          result = await ImageGallerySaver.saveImage(
-            bytes,
-            name: name,
-            isReturnImagePathOfIOS: true,
-            quality: 100,
-          );
-        }
-        ok = (result is Map) ? (result['isSuccess'] == true || result['filePath'] != null) : (result != null);
-      } catch (inner) {
-        // ignore: avoid_print
-        print('saveScreenshot inner error: $inner');
-        ok = false;
-      }
-      if (!mounted) return;
-      if (!ok && Platform.isIOS) {
-        // Graceful fallback: open share sheet so user can Save Image manually
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('保存に失敗。共有から「画像を保存」を選んでください')),
-        );
-        final dir = await getTemporaryDirectory();
-        final path = '${dir.path}/$name';
-        final file = File(path);
-        if (!(await file.exists())) {
-          await file.writeAsBytes(bytes);
-        }
-        await _shareImages([path], text: 'まりもっちの記録', subject: 'まりもっち');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ok ? 'ライブラリに保存しました' : '保存に失敗しました')),
-        );
-      }
-      await _hapticLight();
-    } catch (e, st) {
-      // Log for diagnostics
-      // ignore: avoid_print
-      print('saveScreenshot error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('スクショの作成に失敗しました')));
-    } finally {
-      if (mounted) setState(() => _isCapturing = false);
-    }
-  }
-
-  Future<void> _shareToLine() async {
-    try {
-      // Ensure UI is settled after closing bottom sheet
-      await Future.delayed(const Duration(milliseconds: 60));
-      await WidgetsBinding.instance.endOfFrame;
-      final bytes = await _captureScreenshotBytes();
-      if (bytes == null) throw Exception('screenshot failed');
-      if (mounted) setState(() => _isCapturing = true);
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
-      final file = File(path);
-      await file.writeAsBytes(bytes);
-      await _shareImages([path], text: 'まりもっちの記録', subject: 'まりもっち');
-      await _hapticLight();
-    } catch (e, st) {
-      // ignore: avoid_print
-      print('shareToLine error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('LINE共有に失敗しました')));
-    } finally {
-      if (mounted) setState(() => _isCapturing = false);
-    }
-  }
-
-  Future<void> _shareToX() async {
-    try {
-      await Future.delayed(const Duration(milliseconds: 60));
-      await WidgetsBinding.instance.endOfFrame;
-      final bytes = await _captureScreenshotBytes();
-      if (bytes == null) throw Exception('screenshot failed');
-      if (mounted) setState(() => _isCapturing = true);
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/marimo_${DateTime.now().millisecondsSinceEpoch}.png';
-      final file = File(path);
-      await file.writeAsBytes(bytes);
-      await _shareImages([path], text: '#まりもっち', subject: 'まりもっち');
-      await _hapticLight();
-    } catch (e, st) {
-      // ignore: avoid_print
-      print('shareToX error: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('X共有に失敗しました')));
-    } finally {
-      if (mounted) setState(() => _isCapturing = false);
-    }
   }
 
   String _fmt(DateTime dt) {
@@ -856,11 +636,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final file = File(custom);
       if (file.existsSync()) {
         return BoxDecoration(
-          image: DecorationImage(image: FileImage(file), fit: BoxFit.cover, filterQuality: FilterQuality.high),
+          image: DecorationImage(
+              image: FileImage(file),
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high),
         );
       }
     }
-    return BoxDecoration(gradient: presetBackgrounds[_bgIndex % presetBackgrounds.length].gradient);
+    return BoxDecoration(
+        gradient:
+            presetBackgrounds[_bgIndex % presetBackgrounds.length].gradient);
   }
 
   // Brightness color matrix for ColorFiltered
@@ -868,10 +653,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Clamp and return a 5x4 color matrix that scales RGB by b (alpha unchanged)
     final bb = b.clamp(0.0, 1.5);
     return <double>[
-      bb, 0,  0,  0, 0,
-      0,  bb, 0,  0, 0,
-      0,  0,  bb, 0, 0,
-      0,  0,  0,  1, 0,
+      bb,
+      0,
+      0,
+      0,
+      0,
+      0,
+      bb,
+      0,
+      0,
+      0,
+      0,
+      0,
+      bb,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
     ];
   }
 
@@ -884,37 +685,31 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final bg = presetBackgrounds[_bgIndex % presetBackgrounds.length];
     if (bg.gradient is LinearGradient) {
       final g = bg.gradient as LinearGradient;
-      final avg = Color.lerp(g.colors.first, g.colors.last, 0.5) ?? g.colors.first;
+      final avg =
+          Color.lerp(g.colors.first, g.colors.last, 0.5) ?? g.colors.first;
       return avg.computeLuminance() > 0.5;
     }
     return true;
   }
 
-  Color _panelColor() => _isBackgroundBright() ? Colors.black.withOpacity(0.38) : Colors.white.withOpacity(0.35);
-  Color _panelTextColor() => _isBackgroundBright() ? Colors.white : Colors.black;
-  Color _primaryBg() => _panelTextColor() == Colors.white ? Colors.white : Colors.black87;
-  Color _primaryFg() => _panelTextColor() == Colors.white ? Colors.black : Colors.white;
+  Color _panelColor() => _isBackgroundBright()
+      ? Colors.black.withOpacity(0.38)
+      : Colors.white.withOpacity(0.35);
+  Color _panelTextColor() =>
+      _isBackgroundBright() ? Colors.white : Colors.black;
+  Color _primaryBg() =>
+      _panelTextColor() == Colors.white ? Colors.white : Colors.black87;
+  Color _primaryFg() =>
+      _panelTextColor() == Colors.white ? Colors.black : Colors.white;
   Color _outlineColor() => _panelTextColor().withOpacity(0.9);
 
   Widget _tutorialOverlay() {
     if (!_showTutorial) return const SizedBox.shrink();
     final steps = [
-      (
-        'ようこそ！',
-        '端末を傾けるとまりもが動きます。\nタップで反応します。日中はゆっくり漂います。'
-      ),
-      (
-        '水換えとアイテム',
-        '下部の「水換え」ボタンで清潔度UP。\n「アイテム追加」で水槽にパーツを置けます。'
-      ),
-      (
-        'お手入れの注意',
-        '水換えをしない日が続くと水槽が濁っていきます。\n10日間放置すると、まりもがいなくなってしまうことがあります。'
-      ),
-      (
-        'アイテムの編集',
-        'ピンチ操作で移動・拡大縮小・回転。\n長押しで「削除/前後移動」を選べます。設定から背景変更も可能。'
-      ),
+      ('ようこそ！', '端末を傾けるとまりもが動きます。\nタップで反応します。日中はゆっくり漂います。'),
+      ('水換えとアイテム', '下部の「水換え」ボタンで清潔度UP。\n「アイテム追加」で水槽にパーツを置けます。'),
+      ('お手入れの注意', '水換えをしない日が続くと水槽が濁っていきます。\n10日間放置すると、まりもがいなくなってしまうことがあります。'),
+      ('アイテムの編集', 'ピンチ操作で移動・拡大縮小・回転。\n長押しで「削除/前後移動」を選べます。設定から背景変更も可能。'),
     ];
     final (title, message) = steps[_tutorialStep];
     return Positioned.fill(
@@ -935,16 +730,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 10),
-                      Text(message, style: const TextStyle(fontSize: 16, height: 1.4)),
+                      Text(message,
+                          style: const TextStyle(fontSize: 16, height: 1.4)),
                       const SizedBox(height: 16),
                       Row(
                         children: [
                           TextButton(
                             onPressed: () async {
                               await AppStorage.instance.setTutorialShown(true);
-                              if (mounted) setState(() => _showTutorial = false);
+                              if (mounted)
+                                setState(() => _showTutorial = false);
                             },
                             child: const Text('スキップ'),
                           ),
@@ -955,11 +754,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                               if (_tutorialStep < lastStep) {
                                 setState(() => _tutorialStep += 1);
                               } else {
-                                await AppStorage.instance.setTutorialShown(true);
-                                if (mounted) setState(() => _showTutorial = false);
+                                await AppStorage.instance
+                                    .setTutorialShown(true);
+                                if (mounted)
+                                  setState(() => _showTutorial = false);
                               }
                             },
-                            child: Text(_tutorialStep < (steps.length - 1) ? '次へ' : 'はじめる'),
+                            child: Text(_tutorialStep < (steps.length - 1)
+                                ? '次へ'
+                                : 'はじめる'),
                           )
                         ],
                       )
@@ -1022,7 +825,11 @@ class _TankItemWidget extends StatefulWidget {
   final ValueChanged<TankItem> onChanged;
   final VoidCallback onDelete;
 
-  const _TankItemWidget({super.key, required this.item, required this.onChanged, required this.onDelete});
+  const _TankItemWidget(
+      {super.key,
+      required this.item,
+      required this.onChanged,
+      required this.onDelete});
 
   @override
   State<_TankItemWidget> createState() => _TankItemWidgetState();
@@ -1037,11 +844,16 @@ class _TankItemWidgetState extends State<_TankItemWidget> {
     final item = widget.item;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth == double.infinity ? MediaQuery.of(context).size.width : constraints.maxWidth;
-        final height = constraints.maxHeight == double.infinity ? MediaQuery.of(context).size.height : constraints.maxHeight;
+        final width = constraints.maxWidth == double.infinity
+            ? MediaQuery.of(context).size.width
+            : constraints.maxWidth;
+        final height = constraints.maxHeight == double.infinity
+            ? MediaQuery.of(context).size.height
+            : constraints.maxHeight;
 
         return Align(
-          alignment: Alignment(item.x.clamp(-1.0, 1.0), item.y.clamp(-1.0, 1.0)),
+          alignment:
+              Alignment(item.x.clamp(-1.0, 1.0), item.y.clamp(-1.0, 1.0)),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onScaleStart: (_) {
@@ -1059,9 +871,11 @@ class _TankItemWidgetState extends State<_TankItemWidget> {
                 final dy = (details.focalPointDelta.dy / height) * 2.0;
                 final nx = (item.x + dx).clamp(-1.0, 1.0);
                 final ny = (item.y + dy).clamp(-1.0, 1.0);
-                widget.onChanged(item.copyWith(x: nx, y: ny, scale: newScale, rotation: newRot));
+                widget.onChanged(item.copyWith(
+                    x: nx, y: ny, scale: newScale, rotation: newRot));
               } else {
-                widget.onChanged(item.copyWith(scale: newScale, rotation: newRot));
+                widget.onChanged(
+                    item.copyWith(scale: newScale, rotation: newRot));
               }
             },
             onDoubleTap: () {
@@ -1080,12 +894,14 @@ class _TankItemWidgetState extends State<_TankItemWidget> {
                         ListTile(
                           leading: const Icon(Icons.flip_to_front),
                           title: Text(item.front ? '後ろに移動' : '前に移動'),
-                          onTap: () => Navigator.of(context).pop('toggle_layer'),
+                          onTap: () =>
+                              Navigator.of(context).pop('toggle_layer'),
                         ),
                         const Divider(height: 0),
                         ListTile(
                           leading: const Icon(Icons.delete, color: Colors.red),
-                          title: const Text('削除', style: TextStyle(color: Colors.red)),
+                          title: const Text('削除',
+                              style: TextStyle(color: Colors.red)),
                           onTap: () => Navigator.of(context).pop('delete'),
                         ),
                       ],
@@ -1162,9 +978,14 @@ class _WaterWavePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final t = progress;
     // Two layered waves moving upwards with fade out
-    final baseColor = isBrightBg ? const Color(0xAAFFFFFF) : const Color(0x55FFFFFF);
-    final wave1 = Paint()..color = baseColor..style = PaintingStyle.fill;
-    final wave2 = Paint()..color = baseColor.withOpacity((0.6 * (1 - t)).clamp(0, 1))..style = PaintingStyle.fill;
+    final baseColor =
+        isBrightBg ? const Color(0xAAFFFFFF) : const Color(0x55FFFFFF);
+    final wave1 = Paint()
+      ..color = baseColor
+      ..style = PaintingStyle.fill;
+    final wave2 = Paint()
+      ..color = baseColor.withOpacity((0.6 * (1 - t)).clamp(0, 1))
+      ..style = PaintingStyle.fill;
 
     final amp = size.height * 0.03 * (1 - t); // decreasing amplitude
     final yOffset = size.height * (1 - t); // wave rises up
@@ -1176,7 +997,8 @@ class _WaterWavePainter extends CustomPainter {
       final steps = 40;
       for (int i = 0; i <= steps; i++) {
         final x = size.width * i / steps;
-        final y = yOffset + math.sin((i / steps * 2 * math.pi) + phase) * amp * scale;
+        final y =
+            yOffset + math.sin((i / steps * 2 * math.pi) + phase) * amp * scale;
         path.lineTo(x, y);
       }
       path.lineTo(size.width, size.height);
@@ -1205,7 +1027,9 @@ class _MarimoVisual extends StatelessWidget {
       height: size,
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 8))],
+        boxShadow: [
+          BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 8))
+        ],
       ),
       child: ClipOval(
         child: Image.asset(
@@ -1217,7 +1041,6 @@ class _MarimoVisual extends StatelessWidget {
     );
   }
 }
-
 
 class _MurkinessLayer extends StatelessWidget {
   final double level; // 0.0 (clean) .. 1.0 (very murky)
@@ -1232,7 +1055,8 @@ class _MurkinessLayer extends StatelessWidget {
       children: [
         // Subtle color tint towards green-brown to imply murky water
         Positioned.fill(
-          child: Container(color: const Color(0xFF26332F).withOpacity(tintOpacity)),
+          child: Container(
+              color: const Color(0xFF26332F).withOpacity(tintOpacity)),
         ),
         // Floating particles
         Positioned.fill(
