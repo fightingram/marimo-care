@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -368,6 +369,11 @@ class _HomePageState extends State<HomePage>
                           Positioned.fill(
                               child: Container(
                                   decoration: _backgroundDecoration())),
+                          // Optional water/glass overlay when using custom image background
+                          if (_shouldUseWaterOverlay())
+                            const Positioned.fill(
+                              child: IgnorePointer(child: _WaterGlassOverlay()),
+                            ),
                           Positioned.fill(
                             child: IgnorePointer(
                               child: _MurkinessLayer(
@@ -646,6 +652,16 @@ class _HomePageState extends State<HomePage>
     return BoxDecoration(
         gradient:
             presetBackgrounds[_bgIndex % presetBackgrounds.length].gradient);
+  }
+
+  bool _shouldUseWaterOverlay() {
+    final s = _settings;
+    if (s == null) return false;
+    final p = s.customBackgroundPath;
+    if (p == null || p.isEmpty) return false;
+    final ok = File(p).existsSync();
+    if (!ok) return false;
+    return s.useWaterEffectOnCustomBackground;
   }
 
   // Brightness color matrix for ColorFiltered
@@ -1106,3 +1122,84 @@ class _MurkinessPainter extends CustomPainter {
 }
 
 // Removed old background gallery logic now migrated to SettingsPage
+
+class _WaterGlassOverlay extends StatelessWidget {
+  const _WaterGlassOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    // Layered: slight blur, blue tint, edge highlights, side vignettes
+    return Stack(
+      children: [
+        // Backdrop blur to suggest refraction through water
+        Positioned.fill(
+          child: ClipRect(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 1.2, sigmaY: 1.6),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+        // Subtle water color tint (vertical)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x2221A3E2), // faint blue
+                    Color(0x3321A3E2),
+                    Color(0x4421A3E2),
+                  ],
+                  stops: [0.0, 0.5, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Top/bottom reflective highlights
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.white.withOpacity(0.10),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.white.withOpacity(0.06),
+                  ],
+                  stops: const [0.0, 0.08, 0.92, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Side vignettes to hint glass edges
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.black.withOpacity(0.06),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.06),
+                  ],
+                  stops: const [0.0, 0.08, 0.92, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

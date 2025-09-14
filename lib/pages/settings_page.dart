@@ -75,6 +75,15 @@ class _SettingsPageState extends State<SettingsPage> {
               await _save();
             },
           ),
+          SwitchListTile(
+            title: const Text('背景画像に水槽効果をのせる', style: TextStyle(fontSize: 17)),
+            subtitle: const Text('カスタム背景の上に水の色味・反射・わずかなブラーを重ねます', style: TextStyle(fontSize: 13)),
+            value: s.useWaterEffectOnCustomBackground,
+            onChanged: (v) async {
+              setState(() => _settings = s..useWaterEffectOnCustomBackground = v);
+              await _save();
+            },
+          ),
           const Divider(height: 0),
           ListTile(
             leading: const Icon(Icons.image),

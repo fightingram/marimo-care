@@ -126,6 +126,7 @@ class UserSetting {
   bool floatingEnabled; // 光合成・浮遊アニメON/OFF
   int backgroundIndex; // 背景プリセットのインデックス（0..10）
   String? customBackgroundPath; // 端末アルバム画像のパス（未使用時null）
+  bool useWaterEffectOnCustomBackground; // カスタム画像の上に水槽効果を重ねる
   DateTime? debugNowOverride; // デバッグ用の現在時刻上書き（nullなら実時間）
 
   UserSetting({
@@ -134,6 +135,7 @@ class UserSetting {
     required this.floatingEnabled,
     required this.backgroundIndex,
     this.customBackgroundPath,
+    this.useWaterEffectOnCustomBackground = true,
     this.debugNowOverride,
   });
 
@@ -143,6 +145,7 @@ class UserSetting {
         'floatingEnabled': floatingEnabled,
         'backgroundIndex': backgroundIndex,
         'customBackgroundPath': customBackgroundPath,
+        'useWaterEffectOnCustomBackground': useWaterEffectOnCustomBackground,
         'debugNowOverride': debugNowOverride?.toIso8601String(),
       };
 
@@ -152,6 +155,8 @@ class UserSetting {
         floatingEnabled: json['floatingEnabled'] as bool? ?? true,
         backgroundIndex: (json['backgroundIndex'] as num?)?.toInt() ?? 0,
         customBackgroundPath: json['customBackgroundPath'] as String?,
+        useWaterEffectOnCustomBackground:
+            json['useWaterEffectOnCustomBackground'] as bool? ?? true,
         debugNowOverride: (json['debugNowOverride'] == null)
             ? null
             : DateTime.parse(json['debugNowOverride'] as String),
