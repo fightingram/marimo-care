@@ -854,6 +854,9 @@ class _TankItemWidget extends StatefulWidget {
 class _TankItemWidgetState extends State<_TankItemWidget> {
   double? _startScale;
   double? _startRotation;
+  double? _startX;
+  double? _startY;
+  Offset _accumulatedDelta = Offset.zero;
 
   @override
   Widget build(BuildContext context) {
@@ -875,23 +878,28 @@ class _TankItemWidgetState extends State<_TankItemWidget> {
             onScaleStart: (_) {
               _startScale = item.scale;
               _startRotation = item.rotation;
+              _startX = item.x;
+              _startY = item.y;
+              _accumulatedDelta = Offset.zero;
             },
             onScaleUpdate: (details) {
               final baseScale = _startScale ?? item.scale;
               final baseRot = _startRotation ?? item.rotation;
-              final newScale = (baseScale * details.scale).clamp(0.3, 4.0);
+              final newScale = (baseScale * details.scale).clamp(0.2, 5.0);
               final newRot = baseRot + details.rotation;
-              // Also handle translation via focalPointDelta during scale gesture
+              // Accumulate translation across updates to avoid losing tiny moves
               if (width > 0 && height > 0) {
-                final dx = (details.focalPointDelta.dx / width) * 2.0;
-                final dy = (details.focalPointDelta.dy / height) * 2.0;
-                final nx = (item.x + dx).clamp(-1.0, 1.0);
-                final ny = (item.y + dy).clamp(-1.0, 1.0);
-                widget.onChanged(item.copyWith(
-                    x: nx, y: ny, scale: newScale, rotation: newRot));
-              } else {
+                _accumulatedDelta += details.focalPointDelta;
+                final startX = _startX ?? item.x;
+                final startY = _startY ?? item.y;
+                final dx = (_accumulatedDelta.dx / width) * 2.0;
+                final dy = (_accumulatedDelta.dy / height) * 2.0;
+                final nx = (startX + dx).clamp(-1.0, 1.0);
+                final ny = (startY + dy).clamp(-1.0, 1.0);
                 widget.onChanged(
-                    item.copyWith(scale: newScale, rotation: newRot));
+                    item.copyWith(x: nx, y: ny, scale: newScale, rotation: newRot));
+              } else {
+                widget.onChanged(item.copyWith(scale: newScale, rotation: newRot));
               }
             },
             onDoubleTap: () {
@@ -931,11 +939,15 @@ class _TankItemWidgetState extends State<_TankItemWidget> {
                 widget.onChanged(item.copyWith(front: !item.front));
               }
             },
-            child: Transform.rotate(
+            // Slightly larger invisible hit area to make gestures easier
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Transform.rotate(
               angle: item.rotation,
               child: Transform.scale(
-                scale: item.scale.clamp(0.2, 4.0),
+                scale: item.scale.clamp(0.2, 5.0),
                 child: TankItemRegistry.visualFor(context, item),
+              ),
               ),
             ),
           ),
